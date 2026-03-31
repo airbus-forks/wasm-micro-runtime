@@ -323,6 +323,8 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v6.0.2
+        with:
+          submodules: recursive
 
       - name: Get LLVM libraries
         id: retrieve_llvm_libs
@@ -627,6 +629,14 @@ jobs:
           cmake ..
           cmake --build . --config Release --parallel 4
           ./import-func-callback
+
+      - name: Build Sample [custom_section]
+        run: |
+          cd samples/custom-section
+          ./build.sh
+          ./run.sh
+          ./build.sh --aot
+          ./run.sh --aot
 
   test:
     needs: [build_iwasm, build_llvm_libraries_on_ubuntu_2204, build_wamrc]
