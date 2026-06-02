@@ -1181,6 +1181,15 @@ wasm_runtime_get_wasi_exit_code(WASMModuleInstanceCommon *module_inst);
 void
 wasi_args_set_defaults(WASIArguments *args);
 
+WASIContext *
+wasm_runtime_init_wasi_internal(
+    const char *dir_list[], uint32 dir_count, const char *map_dir_list[],
+    uint32 map_dir_count, const char *env[], uint32 env_count,
+    const char *addr_pool[], uint32 addr_pool_size,
+    const char *ns_lookup_pool[], uint32 ns_lookup_pool_size, char *argv[],
+    uint32 argc, os_raw_file_handle stdinfd, os_raw_file_handle stdoutfd,
+    os_raw_file_handle stderrfd, char *error_buf, uint32 error_buf_size);
+
 bool
 wasm_runtime_init_wasi(WASMModuleInstanceCommon *module_inst,
                        const char *dir_list[], uint32 dir_count,

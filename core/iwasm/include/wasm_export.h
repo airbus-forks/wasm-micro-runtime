@@ -464,6 +464,17 @@ wasm_runtime_malloc(unsigned int size);
 WASM_RUNTIME_API_EXTERN void *
 wasm_runtime_realloc(void *ptr, unsigned int size);
 
+/**
+ * Allocate memory from runtime memory environment and initialize with 0
+ *
+ * @param count number of elements
+ * @param size size of an element
+ *
+ * @return the pointer to the allocated memory
+ */
+WASM_RUNTIME_API_EXTERN void *
+wasm_runtime_calloc(uint64_t count, unsigned int size);
+
 /*
  * Free memory to runtime memory environment.
  */

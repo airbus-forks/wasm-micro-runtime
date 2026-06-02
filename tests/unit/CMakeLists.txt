@@ -99,6 +99,7 @@ add_subdirectory(component)
 add_subdirectory(component-instantiation)
 add_subdirectory(component-execution)
 add_subdirectory(canonical-abi)
+add_subdirectory(libc-wasi-p2)
 add_subdirectory(wave-parser)
 
 if(FULL_TEST)

@@ -313,3 +313,30 @@ The WAVE parser acts as the data provider for the Canonical ABI's `(Function Wra
 ## Source layout
 
 All WAVE parser sources reside in `core/iwasm/common/component-model/wave-parser/`
+
+# WASI Preview 2 Interfaces
+
+WASI preview 2 implementation provides support for the following interfaces, as defined under [WASI proposals](https://github.com/WebAssembly/WASI/tree/main/proposals):
+
+
+| Package                  | Interfaces                      |
+|--------------------------|---------------------------------|
+| CLI                      | environment, exit, stdio, terminal                   |
+| Clocks                   | monotonic-clock,   wall-clock                        |
+| Filesystem               | types, preopens                                      |
+| IO                       | error, poll, streams                                 |
+| Random                   | insecure, random, insecure-seed                      |
+| Sockets                  | instance-network,  ip-name-lookup, network, tcp, udp, tcp-create-socket, udp-create-socket |
+
+
+ Implementation resides in `core/iwasm/libraries/libc-wasi-p2/`, being split between host functions (Posix logic, support for
+ Linux targets only), and wrapper functions (Interfacing Wasip2 method signatures with the underlying host implementation).
+
+All supported WASIP2 wrapper methods are registered as `native symbols` in `core/iwasm/libraries/libc-wasi-p2/libc_wasi_p2_wrapper.c`.
+If a component requires a certain wasi function it will appear in the WASM binary as an exported `WASMComponentFunctionInstance` method of a Resource type imported by the component in the form of a `WASMComponentInstance` import definition.
+
+During Component instantiation the method will be looked up by name in the `native symbols` table, lowered to a `WASMFunction` using canon lower and passed to a core `WASMModuleInstance` as an import function
+
+During execution, those wrapper functions will be called using `wasm_runtime_invoke_native_p2()` (treated as a new execution case inside `wasm_interp_call_func_native()`).
+
+During execution, wrapper functions will populate component [resource table](https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md#table-state ) entries for the associated WASM Resource types, that will later be dropped via the resource's associated [drop method](https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md#canon-resourcedrop).

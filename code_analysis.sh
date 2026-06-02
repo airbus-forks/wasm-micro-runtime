@@ -13,8 +13,10 @@ cd ../../../../
 # Define the target folders
 TARGET_DIRS="core/iwasm/interpreter \
              core/iwasm/common/component-model \
+             core/iwasm/libraries/libc-wasi-p2 \
              tests/unit/canonical* \
-             tests/unit/component*"
+             tests/unit/component* \
+             tests/unit/libc-wasi-p2"
              
 # Define the log report file
 REPORT_FILE="code_analysis_report.log"

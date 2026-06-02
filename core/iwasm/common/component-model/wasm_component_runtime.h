@@ -272,6 +272,7 @@ typedef struct WASMComponentInstTypeInstance {
 typedef struct WASMComponentResourceInstance {
     char *name;
     char *interface_name;
+    bool is_wasi;
     WASMComponentInstance *impl;
     WASMFunctionInstance *drop_method;
     WASMFunctionInstance *new_method;
@@ -378,7 +379,9 @@ typedef struct WASMComponentInstance {
     WASMComponent *component; // Reference to component definition
 
     WASMComponentResourceTable *table;
-
+#if WASM_ENABLE_LIBC_WASI != 0
+    WASIContext *wasi_ctx;
+#endif
     // Index spaces:
 
     // 1 - Component functions
@@ -590,8 +593,26 @@ wasm_component_instantiate(WASMComponent *component, char *error_buf,
 void
 wasm_component_deinstantiate(WASMComponentInstance *comp_instance);
 
+void *
+wasm_runtime_addr_app_to_native_p2(WASMExecEnv *exec_env, uint64 app_offset);
+
+uint64
+wasm_runtime_addr_native_to_app_p2(WASMExecEnv *exec_env, void *native_ptr);
+
+bool
+wasm_runtime_invoke_native_p2(WASMExecEnv *exec_env,
+                              WASMFunctionInstance *func_instance, uint32 *argv,
+                              uint32 argc, uint32 *argv_ret);
+
 WASMComponentFuncTypeInstance *
 wasm_get_component_func_type(WASMExecEnv *exec_env);
+
+uint64
+wasm_module_malloc_p2(WASMExecEnv *exec_env, uint64 size, void **p_native_addr);
+
+bool
+wasm_runtime_validate_app_addr_p2(wasm_exec_env_t exec_env, uint64 app_offset,
+                                  uint64 size);
 
 uint32_t
 wasm_runtime_call_realloc(LiftLowerContext *cx, int32_t old_ptr,

@@ -3767,16 +3767,14 @@ copy_string_array(const char *array[], uint32 array_size, char **buf_ptr,
     return true;
 }
 
-bool
-wasm_runtime_init_wasi(WASMModuleInstanceCommon *module_inst,
-                       const char *dir_list[], uint32 dir_count,
-                       const char *map_dir_list[], uint32 map_dir_count,
-                       const char *env[], uint32 env_count,
-                       const char *addr_pool[], uint32 addr_pool_size,
-                       const char *ns_lookup_pool[], uint32 ns_lookup_pool_size,
-                       char *argv[], uint32 argc, os_raw_file_handle stdinfd,
-                       os_raw_file_handle stdoutfd, os_raw_file_handle stderrfd,
-                       char *error_buf, uint32 error_buf_size)
+WASIContext *
+wasm_runtime_init_wasi_internal(
+    const char *dir_list[], uint32 dir_count, const char *map_dir_list[],
+    uint32 map_dir_count, const char *env[], uint32 env_count,
+    const char *addr_pool[], uint32 addr_pool_size,
+    const char *ns_lookup_pool[], uint32 ns_lookup_pool_size, char *argv[],
+    uint32 argc, os_raw_file_handle stdinfd, os_raw_file_handle stdoutfd,
+    os_raw_file_handle stderrfd, char *error_buf, uint32 error_buf_size)
 {
     WASIContext *wasi_ctx;
     char *argv_buf = NULL;
@@ -3800,10 +3798,8 @@ wasm_runtime_init_wasi(WASMModuleInstanceCommon *module_inst,
 
     if (!(wasi_ctx = runtime_malloc(sizeof(WASIContext), NULL, error_buf,
                                     error_buf_size))) {
-        return false;
+        return NULL;
     }
-
-    wasm_runtime_set_wasi_ctx(module_inst, wasi_ctx);
 
     /* process argv[0], trip the path and suffix, only keep the program name
      */
@@ -4065,7 +4061,7 @@ wasm_runtime_init_wasi(WASMModuleInstanceCommon *module_inst,
     wasi_ctx->ns_lookup_buf = ns_lookup_buf;
     wasi_ctx->ns_lookup_list = ns_lookup_list;
 
-    return true;
+    return wasi_ctx;
 
 fail:
     if (argv_environ_inited)
@@ -4096,8 +4092,34 @@ fail:
         wasm_runtime_free(ns_lookup_buf);
     if (ns_lookup_list)
         wasm_runtime_free(ns_lookup_list);
-    return false;
+    return NULL;
 }
+
+bool
+wasm_runtime_init_wasi(WASMModuleInstanceCommon *module_inst,
+                       const char *dir_list[], uint32 dir_count,
+                       const char *map_dir_list[], uint32 map_dir_count,
+                       const char *env[], uint32 env_count,
+                       const char *addr_pool[], uint32 addr_pool_size,
+                       const char *ns_lookup_pool[], uint32 ns_lookup_pool_size,
+                       char *argv[], uint32 argc, os_raw_file_handle stdinfd,
+                       os_raw_file_handle stdoutfd, os_raw_file_handle stderrfd,
+                       char *error_buf, uint32 error_buf_size)
+{
+
+    WASIContext *wasi_ctx = NULL;
+    wasi_ctx = wasm_runtime_init_wasi_internal(
+        dir_list, dir_count, map_dir_list, map_dir_count, env, env_count,
+        addr_pool, addr_pool_size, ns_lookup_pool, ns_lookup_pool_size, argv,
+        argc, stdinfd, stdoutfd, stderrfd, error_buf, error_buf_size);
+
+    if (!wasi_ctx) {
+        return false;
+    }
+    wasm_runtime_set_wasi_ctx(module_inst, wasi_ctx);
+    return true;
+}
+
 #else  /* else of WASM_ENABLE_UVWASI == 0 */
 static void *
 wasm_uvwasi_malloc(size_t size, void *mem_user_data)

@@ -854,6 +854,9 @@ typedef struct WASIArguments {
     char **argv;
     uint32 argc;
     os_raw_file_handle stdio[3];
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+    libc_wasi_options_t *wasi_options;
+#endif
     bool set_by_user;
 } WASIArguments;
 #endif
