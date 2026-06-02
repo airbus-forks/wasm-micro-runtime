@@ -54,6 +54,12 @@ destroy_host_resource_hash_map(void *value)
 {
     HostResource *hr = (HostResource *)value;
     if (hr) {
+        if (hr->data) {
+            if (hr->dtor) {
+                hr->dtor(hr->data);
+            }
+            BH_FREE(hr->data);
+        }
         BH_FREE(hr);
     }
 }
@@ -129,19 +135,35 @@ host_resource_create(HostResourceType type, uint32_t data_size)
 
     hr->data = wasm_runtime_malloc(data_size);
     if (!hr->data) {
-        LOG_ERROR("Failed to allocate HostResource\n");
+        LOG_ERROR("Failed to allocate HostResource data\n");
+        wasm_runtime_free(hr);
         return NULL;
     }
 
     hr->type = type;
+    hr->dtor = NULL;
 
     return hr;
+}
+
+void
+host_resource_set_dtor(HostResource *hr, host_resource_dtor_t dtor)
+{
+    if (hr) {
+        hr->dtor = dtor;
+    }
 }
 
 void
 destroy_host_resource(HostResource *hr)
 {
     if (hr) {
+        if (hr->data) {
+            if (hr->dtor) {
+                hr->dtor(hr->data);
+            }
+            wasm_runtime_free(hr->data);
+        }
         wasm_runtime_free(hr);
     }
 }

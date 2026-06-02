@@ -1,5 +1,5 @@
-# Copyright (C) 2026 Airbus Defence and Space.  All rights reserved.
-# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+ # Copyright (C) 2026 Airbus Defence and Space Romania SRL. All rights reserved.
+ # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 cmake_minimum_required(VERSION 3.28)
 
@@ -41,6 +41,7 @@ set (unit_test_sources
      ${NATIVE_INTERFACE_SOURCE}
      ${LIBC_BUILTIN_SOURCE}
      ${LIBC_WASI_SOURCE}
+     ${LIBC_WASI_P2_SOURCE}
      ${IWASM_COMMON_SOURCE}
      ${IWASM_COMPONENT_SOURCE}
      ${IWASM_INTERP_SOURCE}

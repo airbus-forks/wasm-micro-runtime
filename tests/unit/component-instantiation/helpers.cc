@@ -5,7 +5,10 @@
 
 #include "helpers.h"
 
+
 // -------- helpers to inspect real components --------
+
+
 
 bool component_has_core_imports(const WASMComponent *c) {
   if (!c) return false;

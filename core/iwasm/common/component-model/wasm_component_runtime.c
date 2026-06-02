@@ -14,6 +14,7 @@
 #include "wasm_component_canonical.h"
 #include "wasm_component_task.h"
 #include "bh_assert.h"
+#include "../../libraries/libc-wasi-p2/wasi_p2_cli.h"
 #include "../../../product-mini/platforms/common/libc_wasi.h"
 
 /// @brief Compute discriminant alignment based on number of cases
@@ -1188,6 +1189,32 @@ wasm_component_instantiate_internal(
     uint32 section_idx = 0;
     WASMComponentSection *section = NULL;
 
+#if WASM_ENABLE_LIBC_WASI != 0
+    if (!comp_instance->parent) {
+        if (!wasm_component_runtime_init_wasi(
+                comp_instance, component->wasi_args.dir_list,
+                component->wasi_args.dir_count,
+                component->wasi_args.map_dir_list,
+                component->wasi_args.map_dir_count, component->wasi_args.env,
+                component->wasi_args.env_count, component->wasi_args.addr_pool,
+                component->wasi_args.addr_count,
+                component->wasi_args.ns_lookup_pool,
+                component->wasi_args.ns_lookup_count, component->wasi_args.argv,
+                component->wasi_args.argc, component->wasi_args.stdio[0],
+                component->wasi_args.stdio[1], component->wasi_args.stdio[2],
+                error_buf, error_buf_size)) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "ERROR: Failed to initiate component wasi args\n");
+            wasm_component_deinstantiate(comp_instance);
+            comp_instance = NULL;
+            goto done;
+        }
+    }
+    else {
+        comp_instance->wasi_ctx = comp_instance->parent->wasi_ctx;
+    }
+#endif
+
     for (section_idx = 0; section_idx < component->section_count;
          section_idx++) {
         section = &component->sections[section_idx];
@@ -1376,6 +1403,49 @@ wasm_component_instantiate(WASMComponent *component, char *error_buf,
                                                error_buf_size);
 }
 
+#if WASM_ENABLE_LIBC_WASI != 0
+void
+wasm_component_runtime_destroy_wasi(WASMComponentInstance *comp_instance)
+{
+    WASIContext *wasi_ctx = comp_instance->wasi_ctx;
+
+    if (wasi_ctx) {
+        if (wasi_ctx->argv_environ) {
+            argv_environ_destroy(wasi_ctx->argv_environ);
+            wasm_runtime_free(wasi_ctx->argv_environ);
+        }
+        if (wasi_ctx->curfds) {
+            fd_table_destroy(wasi_ctx->curfds);
+            wasm_runtime_free(wasi_ctx->curfds);
+        }
+        if (wasi_ctx->prestats) {
+            fd_prestats_destroy(wasi_ctx->prestats);
+            wasm_runtime_free(wasi_ctx->prestats);
+        }
+        if (wasi_ctx->addr_pool) {
+            addr_pool_destroy(wasi_ctx->addr_pool);
+            wasm_runtime_free(wasi_ctx->addr_pool);
+        }
+        if (wasi_ctx->argv_buf)
+            wasm_runtime_free(wasi_ctx->argv_buf);
+        if (wasi_ctx->argv_list)
+            wasm_runtime_free(wasi_ctx->argv_list);
+        if (wasi_ctx->env_buf)
+            wasm_runtime_free(wasi_ctx->env_buf);
+        if (wasi_ctx->env_list)
+            wasm_runtime_free(wasi_ctx->env_list);
+        if (wasi_ctx->ns_lookup_buf)
+            wasm_runtime_free(wasi_ctx->ns_lookup_buf);
+        if (wasi_ctx->ns_lookup_list)
+            wasm_runtime_free(wasi_ctx->ns_lookup_list);
+        if (wasi_ctx->wasi_options)
+            wasm_runtime_free(wasi_ctx->wasi_options);
+
+        wasm_runtime_free(wasi_ctx);
+    }
+}
+#endif
+
 void
 wasm_component_deinstantiate(WASMComponentInstance *comp_instance)
 {
@@ -1426,6 +1496,12 @@ wasm_component_deinstantiate(WASMComponentInstance *comp_instance)
         }
     }
 
+#if WASM_ENABLE_LIBC_WASI != 0
+    if (comp_instance->wasi_ctx && !comp_instance->parent) {
+        // destroy component wasi context
+        wasm_component_runtime_destroy_wasi(comp_instance);
+    }
+#endif
     // Destroy the component instance table
     if (comp_instance->table) {
         wasm_component_table_destroy(comp_instance->table);

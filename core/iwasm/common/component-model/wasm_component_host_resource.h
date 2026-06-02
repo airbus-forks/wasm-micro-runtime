@@ -73,6 +73,10 @@ host_resource_table_get_next_id(HostResourceType type);
 // Helpers
 HostResource *
 host_resource_create(HostResourceType type, uint32_t data_size);
+
+void
+host_resource_set_dtor(HostResource *hr, host_resource_dtor_t dtor);
+
 void
 destroy_host_resource(HostResource *hr);
 

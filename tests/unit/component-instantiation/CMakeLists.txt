@@ -40,6 +40,7 @@ set (unit_test_sources
      ${NATIVE_INTERFACE_SOURCE}
      ${LIBC_BUILTIN_SOURCE}
      ${LIBC_WASI_SOURCE}
+     ${LIBC_WASI_P2_SOURCE}
      ${IWASM_COMMON_SOURCE}
      ${IWASM_COMPONENT_SOURCE}
      ${IWASM_INTERP_SOURCE}
@@ -48,6 +49,8 @@ set (unit_test_sources
 
 # Now simply link against gtest or gtest_main as needed. Eg
 add_executable (component-instantiation ${unit_test_sources})
+
+target_include_directories(component-instantiation PRIVATE ${LIBC_WASI_P2_INCLUDE_DIRS})
 
 find_package(Threads REQUIRED)
 target_link_libraries (component-instantiation ${LLVM_AVAILABLE_LIBS} ${WAMR_TEST_OPENSSL_LIBS} gmock gtest_main Threads::Threads)

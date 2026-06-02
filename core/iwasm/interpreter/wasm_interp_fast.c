@@ -1271,11 +1271,9 @@ wasm_interp_call_func_native(WASMModuleInstance *module_inst,
     }
 
 #if WASM_ENABLE_COMPONENT_MODEL != 0
-    if (cur_func->canon_options
-        && cur_func->canon_options->lift_lower_opts->lift_opts->memory
-        && cur_func->component_function) {
-        LOG_WARNING("No WASI P2 Implementation Yet");
-        return;
+    if (cur_func->canon_options && cur_func->component_function) {
+        ret = wasm_runtime_invoke_native_p2(exec_env, cur_func, frame->lp,
+                                            cur_func->param_cell_num, argv_ret);
     }
     else
 #endif

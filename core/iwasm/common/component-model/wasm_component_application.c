@@ -670,6 +670,37 @@ execute_component_main(WASMComponentInstance *component_inst, int32 argc,
     uint32 *argv_offsets = NULL, module_type = 0;
     bool ret = false, is_import_func = true, is_memory64 = false;
 
+#if WASM_ENABLE_LIBC_WASI != 0
+    /* In wasi mode, we should call the function named "_start"
+       which initializes the wasi environment and then calls
+       the actual main function. Directly calling main function
+       may cause exception thrown. */
+
+    func = wasm_component_runtime_lookup_wasi_start_function(component_inst);
+    if (func) {
+        const char *wasi_proc_exit_exception = "wasi proc exit";
+
+        exec_env = wasm_runtime_get_exec_env_singleton(
+            (WASMModuleInstanceCommon *)func->core_func->module_instance);
+        if (!exec_env) {
+            wasm_component_set_exception(component_inst,
+                                         "create singleton exec_env failed");
+            return false;
+        }
+
+        ret = wasm_runtime_call_wasm(exec_env, func->core_func, 0, NULL);
+
+        /* report wasm proc exit as a success */
+        if (!ret
+            && strstr(component_inst->cur_exception,
+                      wasi_proc_exit_exception)) {
+            component_inst->cur_exception[0] = 0;
+            ret = true;
+        }
+        return ret;
+    }
+#endif /* end of WASM_ENABLE_LIBC_WASI */
+
     func = wasm_component_lookup_function(
         component_inst,
         "run"); // SEEME: TBD wasi:cli interface is needed for lookup

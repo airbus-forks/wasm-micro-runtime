@@ -6,7 +6,9 @@
 #include "wasm_component_canon.h"
 #include "wasm_component_runtime.h"
 #include "wasm_component_task.h"
+#include "wasm_component_host_resource.h"
 #include "wasm_runtime.h"
+#include "../libraries/libc-wasi-p2/wasi_p2_common.h"
 #include "bh_log.h"
 
 bool
@@ -109,6 +111,29 @@ canon_resource_drop(const WASMComponentResourceInstance *rt,
     }
 
     if (own) {
+        if (rt->is_wasi) {
+
+            HostResourceTable *hr_table = get_global_host_resource_table();
+            if (!hr_table) {
+                LOG_ERROR("canon resource.drop: failed to retrieve host "
+                          "resource table");
+                return false;
+            }
+
+            HostResource *hr = host_resource_table_get(hr_table, rep);
+            if (!hr) {
+                LOG_ERROR("canon resource.drop: failed to retrieve host "
+                          "resource handle");
+                return false;
+            }
+
+            if (!host_resource_table_delete(hr_table, rep)) {
+                LOG_ERROR("canon resource.drop: failed to remove handle from "
+                          "host table");
+                return false;
+            }
+        }
+
         if (rt->dtor_method) {
             WASMExecEnv *dtor_exec_env = wasm_runtime_get_exec_env_singleton(
                 (WASMModuleInstanceCommon *)rt->dtor_method->module_instance);

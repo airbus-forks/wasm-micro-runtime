@@ -580,6 +580,44 @@ WASMComponentFunctionInstance *
 wasm_component_lookup_function(const WASMComponentInstance *component_inst,
                                const char *name);
 
+#if WASM_ENABLE_LIBC_WASI != 0
+
+bool
+wasm_component_runtime_init_wasi(
+    WASMComponentInstance *comp_instance, const char *dir_list[],
+    uint32 dir_count, const char *map_dir_list[], uint32 map_dir_count,
+    const char *env[], uint32 env_count, const char *addr_pool[],
+    uint32 addr_pool_size, const char *ns_lookup_pool[],
+    uint32 ns_lookup_pool_size, char *argv[], uint32 argc,
+    os_raw_file_handle stdinfd, os_raw_file_handle stdoutfd,
+    os_raw_file_handle stderrfd, char *error_buf, uint32 error_buf_size);
+
+void
+wasm_component_runtime_set_wasi_args(WASMComponent *component,
+                                     const char *dir_list[], uint32 dir_count,
+                                     const char *map_dir_list[],
+                                     uint32 map_dir_count,
+                                     const char *env_list[], uint32 env_count,
+                                     char *argv[], int argc);
+
+void
+wasm_component_runtime_set_wasi_options(WASMComponent *component,
+                                        libc_wasi_options_t *wasi_options);
+
+void
+wasm_component_runtime_set_wasi_addr_pool(WASMComponent *component,
+                                          const char *addr_pool[],
+                                          uint32 addr_pool_size);
+
+void
+wasm_component_runtime_set_wasi_ns_lookup_pool(WASMComponent *component,
+                                               const char *ns_lookup_pool[],
+                                               uint32 ns_lookup_pool_size);
+
+WASMComponentFunctionInstance *
+wasm_component_runtime_lookup_wasi_start_function(
+    WASMComponentInstance *component_inst);
+#endif
 WASMComponentInstance *
 wasm_component_instantiate_internal(
     WASMComponent *component,

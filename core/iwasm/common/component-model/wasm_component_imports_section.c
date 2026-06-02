@@ -12,6 +12,7 @@
 #include "wasm_runtime_common.h"
 #include "wasm_export.h"
 #include <stdio.h>
+#include "../../libraries/libc-wasi-p2/libc_wasi_p2_wrapper.h"
 
 // Section 10: imports section
 bool
@@ -380,6 +381,12 @@ wasm_resolve_imports_WASI(WASMComponentImportSection *import_section,
                              import->import_name->tag);
             return false;
         }
+        if (!wasm_check_wasi_p2_version(interface_name)) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "ERROR: Incompatible WASI version for %s",
+                             interface_name);
+            return false;
+        }
 
         LOG_DEBUG("  WASI Import : %s", interface_name);
 
@@ -419,67 +426,9 @@ wasm_resolve_imports_WASI(WASMComponentImportSection *import_section,
                     continue;
                 }
                 new_inst->types[new_inst->types_count]
+                    ->type_specific.resource->is_wasi = true;
+                new_inst->types[new_inst->types_count]
                     ->type_specific.resource->interface_name = interface_name;
-                field_name = new_inst->types[new_inst->types_count]
-                                 ->type_specific.resource->name;
-                char method_name[16 + strlen(field_name)];
-                method_name[0] = '\0';
-                strcat(method_name, "[resource-drop]");
-                strcat(method_name, field_name);
-                func_import = instance_type
-                                  ->defined_core_funcs[instance_type->func_count
-                                                       + resource_count]
-                                  .u.func_import;
-                // TODO: After we have flatten functionality, generate func type
-                // here to can check signature validity in
-                // wasm_native_resolve_symbol, for now that check is skipped
-                func_ptr = wasm_native_resolve_symbol(
-                    interface_name, method_name, NULL, &func_import->signature,
-                    &func_import->attachment, &func_import->call_conv_raw);
-
-                if (!func_ptr) {
-                    func_ptr = wasm_native_resolve_symbol(
-                        interface_name, method_name, NULL,
-                        &func_import->signature, &func_import->attachment,
-                        &func_import->call_conv_raw);
-                }
-
-                if (func_ptr) {
-                    // Wasi drop methods are overwritten with the method from
-                    // native symbols, if available
-                    new_inst->types[new_inst->types_count]
-                        ->type_specific.resource->drop_method->u.func_import =
-                        func_import;
-                    new_inst->types[new_inst->types_count]
-                        ->type_specific.resource->drop_method->u.func_import
-                        ->func_ptr_linked = func_ptr;
-                    new_inst->types[new_inst->types_count]
-                        ->type_specific.resource->drop_method->u.func_import
-                        ->field_name = field_name;
-                    new_inst->types[new_inst->types_count]
-                        ->type_specific.resource->drop_method->u.func_import
-                        ->module_name =
-                        new_inst->types[new_inst->types_count]
-                            ->type_specific.resource->interface_name;
-                    new_inst->types[new_inst->types_count]
-                        ->type_specific.resource->drop_method->is_import_func =
-                        true;
-                    new_inst->types[new_inst->types_count]
-                        ->type_specific.resource->drop_method->is_canon_func =
-                        true;
-                    new_inst->types[new_inst->types_count]
-                        ->type_specific.resource->drop_method->canon_type =
-                        WASM_COMP_CANON_RESOURCE_DROP;
-                    new_inst->types[new_inst->types_count]
-                        ->type_specific.resource->drop_method
-                        ->import_func_inst =
-                        &instance_type
-                             ->defined_core_funcs[instance_type->func_count
-                                                  + resource_count];
-                    new_inst->types[new_inst->types_count]
-                        ->type_specific.resource->drop_method->import_func_inst
-                        ->is_canon_func = true;
-                }
                 resource_count++;
             }
             new_inst->types_count++;
@@ -513,6 +462,8 @@ wasm_resolve_imports_WASI(WASMComponentImportSection *import_section,
                     &func_import->attachment, &func_import->call_conv_raw);
 
                 if (!func_ptr) {
+                    wasm_native_register_wasi_p2_module_func(interface_name,
+                                                             field_name);
                     func_ptr = wasm_native_resolve_symbol(
                         interface_name, field_name, NULL,
                         &func_import->signature, &func_import->attachment,
@@ -520,18 +471,23 @@ wasm_resolve_imports_WASI(WASMComponentImportSection *import_section,
                 }
 
                 if (!func_ptr) {
-                    LOG_WARNING("WASI function %s::%s not found in native "
-                                "symbols, leaving unlinked",
-                                interface_name, field_name);
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "ERROR: Function %s not found in native symbols\n",
+                        field_name);
+                    return false;
                 }
+                LOG_DEBUG(
+                    "  WASI function : %s %s found successfully, %d params",
+                    interface_name, field_name,
+                    instance_type->defined_core_funcs[func_export_count]
+                        .param_count);
                 new_inst->defined_functions[func_export_count].core_func =
                     &instance_type->defined_core_funcs[func_export_count];
                 new_inst->defined_functions[func_export_count]
                     .core_func->is_import_func = true;
-                if (func_ptr) {
-                    new_inst->defined_functions[func_export_count]
-                        .core_func->u.func_import->func_ptr_linked = func_ptr;
-                }
+                new_inst->defined_functions[func_export_count]
+                    .core_func->u.func_import->func_ptr_linked = func_ptr;
                 new_inst->exports[idx].exp.function =
                     &new_inst->defined_functions[func_export_count];
                 func_export_count++;

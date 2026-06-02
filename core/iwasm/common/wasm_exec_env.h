@@ -174,12 +174,15 @@ typedef struct WASMExecEnv {
 
     /*
     Added to the end so it preserves AOT layout
-    There are static assertions in aot_runtime.c for the AOT, that compiler generates for
-    optimized assembly code that directly accesses WASMExecEnv
+    There are static assertions in aot_runtime.c for the AOT, that compiler
+    generates for optimized assembly code that directly accesses WASMExecEnv
     fields using hardcoded memory offsets for performance.
+
     These assertions ensure AOT-generated code can access fields directly:
     bh_static_assert(offsetof(WASMExecEnv, argv_buf) == 3 * sizeof(uintptr_t));
-    bh_static_assert(offsetof(WASMExecEnv, native_stack_boundary) == 4 * sizeof(uintptr_t));
+    bh_static_assert(offsetof(WASMExecEnv, native_stack_boundary) == 4 *
+    sizeof(uintptr_t));
+
     The AOT-generated code looks something like:
     ; Instead of slow: exec_env->argv_buf
     ; AOT generates fast: *(exec_env + 24)  // 3 * 8 bytes on 64-bit

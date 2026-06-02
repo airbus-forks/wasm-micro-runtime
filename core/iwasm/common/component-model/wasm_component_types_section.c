@@ -2655,6 +2655,7 @@ fill_resource_type_instance(WASMComponentTypeInstance **types,
         }
         resource->dtor_method = dtor_func;
     }
+    resource->is_wasi = false;
     resource->impl = comp_instance;
     resource->drop_method = drop_method;
     resource->new_method = new_method;

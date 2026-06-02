@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Airbus Defence and Space.  All rights reserved.
+ * Copyright (C) 2026 Airbus Defence and Space Romania SRL. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  */
 
@@ -16,27 +16,27 @@
 
 typedef struct libc_wasi_options_t {
     uint32 cli : 1;
-    uint32 cli_exit_with_code : 1;      // unsupported for now
+    uint32 cli_exit_with_code : 1; // unsupported for now
     uint32 common : 1;
-    uint32 nn : 1;                      // unsupported for now
-    uint32 threads : 1;                 // unsupported for now
-    uint32 http : 1;                    // unsupported for now
-    uint32 config : 1;                  // unsupported for now
-    uint32 keyvalue : 1;                // unsupported for now
-    uint32 listenfd : 1;                // unsupported for now
-    uint32 tls : 1;                     // unsupported for now
-    uint32 preview2 : 1;                // unsupported for now
+    uint32 nn : 1;       // unsupported for now
+    uint32 threads : 1;  // unsupported for now
+    uint32 http : 1;     // unsupported for now
+    uint32 config : 1;   // unsupported for now
+    uint32 keyvalue : 1; // unsupported for now
+    uint32 listenfd : 1; // unsupported for now
+    uint32 tls : 1;      // unsupported for now
+    uint32 preview2 : 1; // unsupported for now
     uint32 inherit_network : 1;
     uint32 allow_ip_name_lookup : 1;
     uint32 tcp : 1;
     uint32 udp : 1;
-    uint32 network_error_code : 1;      // unsupported for now
+    uint32 network_error_code : 1; // unsupported for now
     uint32 inherit_env : 1;
-    uint32 p3 : 1;                      // unsupported for now
-    uint32 http_outgoing_body_buffer_chunk;     // unsupported for now
-    uint32 http_outgoing_body_chunk_size;   	// unsupported for now
-    uint32 config_var;                          // unsupported for now
-    uint32 keyvalue_in_memory_data;             // unsupported for now
+    uint32 p3 : 1;                          // unsupported for now
+    uint32 http_outgoing_body_buffer_chunk; // unsupported for now
+    uint32 http_outgoing_body_chunk_size;   // unsupported for now
+    uint32 config_var;                      // unsupported for now
+    uint32 keyvalue_in_memory_data;         // unsupported for now
 
 } libc_wasi_options_t;
 
@@ -73,11 +73,19 @@ void
 libc_wasi_init(wasm_module_t wasm_module, int argc, char **argv,
                libc_wasi_parse_context_t *ctx);
 
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+void
+libc_component_wasi_init(WASMComponent *wasm_component, int argc, char **argv,
+                         libc_wasi_parse_context_t *ctx);
+#endif
+
 void
 libc_wasi_set_default_options(libc_wasi_parse_context_t *ctx);
 
 bool
-libc_wasi_check_option(const char *arg, libc_wasi_parse_context_t *ctx, const char *option, int len, libc_wasi_parse_result_t *res);
+libc_wasi_check_option(const char *arg, libc_wasi_parse_context_t *ctx,
+                       const char *option, int len,
+                       libc_wasi_parse_result_t *res);
 
 libc_wasi_parse_result_t
 libc_wasi_parse_options(const char *arg, libc_wasi_parse_context_t *ctx);

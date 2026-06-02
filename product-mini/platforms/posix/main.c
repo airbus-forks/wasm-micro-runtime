@@ -867,6 +867,10 @@ execute_wasm_component(uint8 *wasm_file_buf, uint32 wasm_file_size,
         return false;
     }
 
+#if WASM_ENABLE_LIBC_WASI != 0
+    libc_component_wasi_init(component_out, app_argc, app_argv, wasi_parse_ctx);
+#endif
+
     if (!wasm_runtime_instantiation_args_create(&inst_args)) {
         LOG_ERROR("failed to create instantiate args\n");
         return false;
@@ -1187,6 +1191,21 @@ main(int argc, char *argv[])
             wasm_proposal_print_status();
             return 0;
         }
+#if WASM_ENABLE_LIBC_WASI != 0 && WASM_ENABLE_COMPONENT_MODEL != 0
+        else if (!strcmp(argv[0], "-S")) {
+            argc--, argv++;
+            libc_wasi_parse_result_t result =
+                libc_wasi_parse_options(argv[0], &wasi_parse_ctx);
+            switch (result) {
+                case LIBC_WASI_PARSE_RESULT_OK:
+                    continue;
+                case LIBC_WASI_PARSE_RESULT_NEED_HELP:
+                    return print_help();
+                case LIBC_WASI_PARSE_RESULT_BAD_PARAM:
+                    return 1;
+            }
+        }
+#endif
         else {
 #if WASM_ENABLE_LIBC_WASI != 0
             libc_wasi_parse_result_t result =

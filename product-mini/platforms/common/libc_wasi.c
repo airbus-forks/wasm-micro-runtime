@@ -38,6 +38,22 @@ libc_wasi_print_help(void)
     printf("                           --allow-resolve=*.example.com # allow "
            "the lookup of all subdomains\n");
     printf("                           --allow-resolve=* # allow any lookup\n");
+    printf("  -S  [sandbox options]      Set Sandbox environment flags \n");
+    printf("                              cli[=y|n] -- Enable support for WASI "
+           "CLI APIs, including filesystems, sockets, clocks, and random.\n");
+    printf("                           common[=y|n] -- Deprecated alias for "
+           "`cli`\n");
+    printf("                  inherit-network[=y|n] -- Flag for WASI preview2 "
+           "to inherit the host's network within the guest so it has full "
+           "access to all addresses/ports/etc.\n");
+    printf("             allow-ip-name-lookup[=y|n] -- Indicates whether "
+           "`wasi:sockets/ip-name-lookup` is enabled or not.\n");
+    printf("                              tcp[=y|n] -- Indicates whether "
+           "`wasi:sockets` TCP support is enabled or not.\n");
+    printf("                              udp[=y|n] -- Indicates whether "
+           "`wasi:sockets` UDP support is enabled or not.\n");
+    printf("                      inherit-env[=y|n] -- Inherit all environment "
+           "variables from the parent process.\n");
 }
 
 static bool
@@ -158,7 +174,24 @@ libc_wasi_set_init_args(struct InstantiationArgs2 *args, int argc, char **argv,
 
 #if WASM_ENABLE_COMPONENT_MODEL != 0
 void
-libc_wasi_set_default_options(libc_wasi_parse_context_t *ctx) {
+libc_component_wasi_init(WASMComponent *wasm_component, int argc, char **argv,
+                         libc_wasi_parse_context_t *ctx)
+{
+    wasm_component_runtime_set_wasi_args(
+        wasm_component, ctx->dir_list, ctx->dir_list_size, ctx->map_dir_list,
+        ctx->map_dir_list_size, ctx->env_list, ctx->env_list_size, argv, argc);
+
+    wasm_component_runtime_set_wasi_options(wasm_component, &ctx->wasi_options);
+
+    wasm_component_runtime_set_wasi_addr_pool(wasm_component, ctx->addr_pool,
+                                              ctx->addr_pool_size);
+    wasm_component_runtime_set_wasi_ns_lookup_pool(
+        wasm_component, ctx->ns_lookup_pool, ctx->ns_lookup_pool_size);
+}
+
+void
+libc_wasi_set_default_options(libc_wasi_parse_context_t *ctx)
+{
     ctx->wasi_options.allow_ip_name_lookup = 1;
     ctx->wasi_options.cli = 1;
     ctx->wasi_options.common = 1;
@@ -170,7 +203,9 @@ libc_wasi_set_default_options(libc_wasi_parse_context_t *ctx) {
 }
 
 void
-libc_wasi_set_field(const char *option, libc_wasi_parse_context_t *ctx, uint32 val) {
+libc_wasi_set_field(const char *option, libc_wasi_parse_context_t *ctx,
+                    uint32 val)
+{
     if (!strcmp(option, "cli=")) {
         ctx->wasi_options.cli = val;
     }
@@ -192,11 +227,13 @@ libc_wasi_set_field(const char *option, libc_wasi_parse_context_t *ctx, uint32 v
     else if (!strcmp(option, "udp=")) {
         ctx->wasi_options.udp = val;
     }
-
 }
 
 bool
-libc_wasi_check_option(const char *arg, libc_wasi_parse_context_t *ctx, const char *option, int len, libc_wasi_parse_result_t *res) {
+libc_wasi_check_option(const char *arg, libc_wasi_parse_context_t *ctx,
+                       const char *option, int len,
+                       libc_wasi_parse_result_t *res)
+{
 
     if (strncmp(arg, option, len)) {
         return false;
@@ -212,7 +249,8 @@ libc_wasi_check_option(const char *arg, libc_wasi_parse_context_t *ctx, const ch
         *res = LIBC_WASI_PARSE_RESULT_OK;
     }
     else {
-        printf("Expected Yes (y/Y) or No (n/N) answer, \'%c\' not allowed\n", arg[len]);
+        printf("Expected Yes (y/Y) or No (n/N) answer, \'%c\' not allowed\n",
+               arg[len]);
         *res = LIBC_WASI_PARSE_RESULT_BAD_PARAM;
     }
     return true;
@@ -222,16 +260,16 @@ libc_wasi_parse_result_t
 libc_wasi_parse_options(const char *arg, libc_wasi_parse_context_t *ctx)
 {
     libc_wasi_parse_result_t res = LIBC_WASI_PARSE_RESULT_NEED_HELP;
-    if (libc_wasi_check_option(arg, ctx, "cli=", 4, &res) ||
-        libc_wasi_check_option(arg, ctx, "cli-exit-with-code=", 19, &res) ||
-        libc_wasi_check_option(arg, ctx, "common=", 7, &res) ||
-        libc_wasi_check_option(arg, ctx, "inherit-network=", 16, &res) ||
-        libc_wasi_check_option(arg, ctx, "allow-ip-name-lookup=", 21, &res) ||
-        libc_wasi_check_option(arg, ctx, "tcp=", 4, &res) ||
-        libc_wasi_check_option(arg, ctx, "udp=", 4, &res) ||
-        libc_wasi_check_option(arg, ctx, "inherit-env=", 12, &res)) {
-            return res;
-        }
+    if (libc_wasi_check_option(arg, ctx, "cli=", 4, &res)
+        || libc_wasi_check_option(arg, ctx, "cli-exit-with-code=", 19, &res)
+        || libc_wasi_check_option(arg, ctx, "common=", 7, &res)
+        || libc_wasi_check_option(arg, ctx, "inherit-network=", 16, &res)
+        || libc_wasi_check_option(arg, ctx, "allow-ip-name-lookup=", 21, &res)
+        || libc_wasi_check_option(arg, ctx, "tcp=", 4, &res)
+        || libc_wasi_check_option(arg, ctx, "udp=", 4, &res)
+        || libc_wasi_check_option(arg, ctx, "inherit-env=", 12, &res)) {
+        return res;
+    }
     else {
         printf("Option %s not supported\n", arg);
         libc_wasi_print_help();

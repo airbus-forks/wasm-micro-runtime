@@ -774,34 +774,24 @@ wasm_resolve_core_instance(WASMComponentCoreInstSection *instance_section,
             core_instance->core_instance_idx =
                 comp_instance->core_module_instances_count;
             comp_instance->core_module_instances_count++;
+            comp_instance->defined_core_instances
+                [comp_instance->defined_core_instances_count] = core_instance;
+            comp_instance->defined_core_instances_count++;
 
             WASMComponentInstance *root_comp_inst = comp_instance;
             while (root_comp_inst->parent)
                 root_comp_inst = root_comp_inst->parent;
             WASMComponent *root_comp = root_comp_inst->component;
 
-            if (!wasm_runtime_init_wasi(
-                    (WASMModuleInstanceCommon *)core_instance,
-                    root_comp->wasi_args.dir_list,
-                    root_comp->wasi_args.dir_count,
-                    root_comp->wasi_args.map_dir_list,
-                    root_comp->wasi_args.map_dir_count,
-                    root_comp->wasi_args.env, root_comp->wasi_args.env_count,
-                    root_comp->wasi_args.addr_pool,
-                    root_comp->wasi_args.addr_count,
-                    root_comp->wasi_args.ns_lookup_pool,
-                    root_comp->wasi_args.ns_lookup_count,
-                    root_comp->wasi_args.argv, root_comp->wasi_args.argc,
-                    root_comp->wasi_args.stdio[0],
-                    root_comp->wasi_args.stdio[1],
-                    root_comp->wasi_args.stdio[2], error_buf, error_buf_size)) {
-                set_error_buf_ex(error_buf, error_buf_size,
-                                 "ERROR: Failed to initiate wasi args for core "
-                                 "module instance\n");
-                goto fail_imports;
-            }
+#if WASM_ENABLE_LIBC_WASI != 0
+            wasm_runtime_set_wasi_ctx((WASMModuleInstanceCommon *)core_instance,
+                                      comp_instance->wasi_ctx);
             WASIContext *wasi_ctx = wasm_runtime_get_wasi_ctx(
                 (WASMModuleInstanceCommon *)core_instance);
+            if (wasi_ctx) {
+                wasi_ctx->wasi_options = root_comp->wasi_args.wasi_options;
+            }
+#endif
             goto done_imports;
         fail_imports:
             imports_ok = false;
