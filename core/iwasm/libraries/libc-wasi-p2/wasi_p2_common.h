@@ -14,6 +14,7 @@
 #include "component-model/wasm_canonical_abi.h"
 #include "component-model/wasm_component_canonical.h"
 #include "wasm_component_host_resource.h"
+#include "wasi_p2_sockets_wrapper.h"
 #include "wasi_p2_filesystem_wrapper.h"
 
 #ifdef __cplusplus

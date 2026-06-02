@@ -157,6 +157,114 @@ TEST_F(CanonSandboxedEnv, test_option_common_off)
   ASSERT_EQ(ret[0] , 0);     // none
 }
 
+TEST_F(CanonSandboxedEnv, test_option_ip_name_lookup_off)
+{
+  libc_wasi_set_default_options(&parse_ctx);
+
+  bool status = libc_wasi_parse_options("allow-ip-name-lookup=n", &parse_ctx);
+  ASSERT_TRUE(status == LIBC_WASI_PARSE_RESULT_OK);
+
+  WASMComponent *component = LoadfromCandidates("test_sockets_comp.wasm");
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  libc_component_wasi_init(component, 0, NULL, &parse_ctx);
+
+  comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  WASIContext *wasi_ctx = wasm_runtime_get_wasi_ctx((WASMModuleInstanceCommon *)comp_instance->core_module_instances[9]);
+  ASSERT_TRUE(wasi_ctx->wasi_options);
+  ASSERT_EQ(wasi_ctx->wasi_options->allow_ip_name_lookup, 0);
+
+  ASSERT_TRUE(wasm_component_application_execute_func(comp_instance, (char *)"call-ip-lookup-resolve-address()"));
+  int32 *ret = (int32 *)(comp_instance->core_memories[0]->memory_data);
+  ASSERT_EQ(ret[0] , 1);     // error
+  ASSERT_EQ(ret[1], WASI_NETWORK_ERROR_CODE_NOT_SUPPORTED);
+}
+
+TEST_F(CanonSandboxedEnv, test_option_inherit_network_off)
+{
+  libc_wasi_set_default_options(&parse_ctx);
+
+  bool status = libc_wasi_parse_options("inherit-network=n", &parse_ctx);
+  ASSERT_TRUE(status == LIBC_WASI_PARSE_RESULT_OK);
+
+  WASMComponent *component = LoadfromCandidates("test_sockets_comp.wasm");
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  libc_component_wasi_init(component, 0, NULL, &parse_ctx);
+
+  comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  WASIContext *wasi_ctx = wasm_runtime_get_wasi_ctx((WASMModuleInstanceCommon *)comp_instance->core_module_instances[9]);
+  ASSERT_TRUE(wasi_ctx->wasi_options);
+  ASSERT_EQ(wasi_ctx->wasi_options->inherit_network, 0);
+
+  ASSERT_TRUE(wasm_component_application_execute_func(comp_instance, (char *)"call-ip-lookup-resolve-address()"));
+  int32 *ret = (int32 *)(comp_instance->core_memories[0]->memory_data);
+  ASSERT_EQ(ret[0] , 1);     // error
+  ASSERT_EQ(ret[1], WASI_NETWORK_ERROR_CODE_NOT_SUPPORTED);
+}
+
+TEST_F(CanonSandboxedEnv, test_option_tcp_off)
+{
+  libc_wasi_set_default_options(&parse_ctx);
+
+  bool status = libc_wasi_parse_options("tcp=n", &parse_ctx);
+  ASSERT_TRUE(status == LIBC_WASI_PARSE_RESULT_OK);
+
+  WASMComponent *component = LoadfromCandidates("test_sockets_comp.wasm");
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  libc_component_wasi_init(component, 0, NULL, &parse_ctx);
+
+  comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  WASIContext *wasi_ctx = wasm_runtime_get_wasi_ctx((WASMModuleInstanceCommon *)comp_instance->core_module_instances[9]);
+  ASSERT_TRUE(wasi_ctx->wasi_options);
+  ASSERT_EQ(wasi_ctx->wasi_options->tcp, 0);
+
+  ASSERT_TRUE(wasm_component_application_execute_func(comp_instance, (char *)"call-tcp-shutdown()"));
+    WASMComponentTypeInstance *ret_type = comp_instance->functions[49]->func_type->results->result;
+  LiftLowerContext cx;
+  cx.canonical_opts = comp_instance->core_functions[93]->canon_options;
+  cx.inst = comp_instance;
+
+  wit_value_t loaded_value;
+  bool load_result = load(&cx, 0, ret_type, &loaded_value);
+
+  ASSERT_TRUE(load_result);
+  ASSERT_NE(loaded_value, nullptr);
+  ASSERT_TRUE(loaded_value->value.result_value.is_err);
+}
+
+TEST_F(CanonSandboxedEnv, test_option_udp_off)
+{
+  libc_wasi_set_default_options(&parse_ctx);
+
+  bool status = libc_wasi_parse_options("udp=n", &parse_ctx);
+  ASSERT_TRUE(status == LIBC_WASI_PARSE_RESULT_OK);
+
+  WASMComponent *component = LoadfromCandidates("test_sockets_comp.wasm");
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  libc_component_wasi_init(component, 0, NULL, &parse_ctx);
+
+  comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  WASIContext *wasi_ctx = wasm_runtime_get_wasi_ctx((WASMModuleInstanceCommon *)comp_instance->core_module_instances[9]);
+  ASSERT_TRUE(wasi_ctx->wasi_options);
+  ASSERT_EQ(wasi_ctx->wasi_options->udp, 0);
+
+  ASSERT_TRUE(wasm_component_application_execute_func(comp_instance, (char *)"call-create-udp-socket()"));
+  int32 *ret = (int32 *)(comp_instance->core_memories[0]->memory_data);
+  ASSERT_EQ(ret[0] , 1);     // error
+  ASSERT_EQ(ret[1], WASI_NETWORK_ERROR_CODE_NOT_SUPPORTED);
+}
+
 TEST_F(CanonSandboxedEnv, test_option_inherit_env)
 {
   libc_wasi_set_default_options(&parse_ctx);

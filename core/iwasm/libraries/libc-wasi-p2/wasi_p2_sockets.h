@@ -83,13 +83,6 @@ typedef struct wasi_outgoing_datagram_t {
     uint64_t data_len;
     wasi_ip_socket_address_t *remote_address;
 } wasi_outgoing_datagram_t;
-
-typedef struct wasi_socket_context_t {
-    uint32_t fd;
-    wasi_ip_address_family_t family;
-    uint64_t tcp_listen_backlog;
-} wasi_socket_context_t;
-
 wasi_network_t
 wasi_sockets_instance_network(void);
 void

@@ -755,6 +755,7 @@ TEST_F(ComponentInstantiationTest, TestResolveCanons)
   wasm_component_deinstantiate(comp_instance);
 }
 
+
 TEST_F(ComponentInstantiationTest, TestInstantiateInternal)
 {
   uint32 idx;
@@ -772,6 +773,16 @@ TEST_F(ComponentInstantiationTest, TestInstantiateInternal)
   // Test component is instantiated
   WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
   ASSERT_TRUE(comp_instance);
+
+  char file_name_2[] = "complex.wasm";
+  WASMComponent *component_2 = load_component_from_candidates(file_name_2);
+  ASSERT_NE(component_2, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component_2);
+
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance_2 = wasm_component_instantiate_internal(component_2, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance_2);
 
   // Test all index spaces are populated correctly
   ASSERT_EQ(comp_instance->component_instances_count, 5);
@@ -796,6 +807,7 @@ TEST_F(ComponentInstantiationTest, TestInstantiateInternal)
   // Test Alias sections are resolved correctly
   ASSERT_EQ(comp_instance->component_instances[1], comp_instance->component_instances[0]->exports[0].exp.instance); /*Alias export*/
   ASSERT_EQ(comp_instance->component_instances[2]->core_functions[1] , comp_instance->component_instances[2]->core_module_instances[0]->export_functions[0].function); /*Alias core export*/
+  ASSERT_EQ(comp_instance_2->types[2]->type_specific.instance->types[0], comp_instance_2->types[1]); /*Alias outer*/
 
   // Test core export tables are instantiated correctly
   ASSERT_EQ(comp_instance->component_instances[2]->core_module_instances[0]->export_table_count, 1);
@@ -816,18 +828,209 @@ TEST_F(ComponentInstantiationTest, TestInstantiateInternal)
   for (idx = 0; idx < defined_core_instances_count; idx++) {
     ASSERT_FALSE(defined_core_instances[idx]);
   }
+  ASSERT_EQ(defined_instances_count, 2);
+  for (idx = 0; idx < defined_instances_count; idx++) {
+    ASSERT_FALSE(defined_instances[idx]);
+  }
   wasm_runtime_free(component);
 
 }
 
+TEST_F(ComponentInstantiationTest, TestInstantiateWASIImports)
+{
+  bool status;
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_VERBOSE);
+
+  const char *path = nullptr;
+  unsigned char *buf = nullptr;
+  char file_name[] = "hello_wasi.wasm";
+  WASMComponent *component = load_component_from_candidates(file_name);
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component);
+
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  // Test canonical options information is filled corectly
+  ASSERT_EQ(comp_instance->core_functions_count, 42);
+  ASSERT_TRUE(comp_instance->core_functions[40]->canon_options);
+  ASSERT_TRUE(comp_instance->core_functions[40]->canon_options->lift_lower_opts->lift_opts->memory);
+
+  // Test core instance link to parent instance is filled
+  ASSERT_EQ(comp_instance->core_module_instances[2]->comp_instance, comp_instance );
+
+  // Test resource count is filled correctly
+  ASSERT_EQ(comp_instance->resources_count, 4);
+
+  wasm_component_deinstantiate(comp_instance);
+
+  char file_name_2[] = "wasip2_tcp_server.wasm";
+  component = load_component_from_candidates(file_name_2);
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+  comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+
+  ASSERT_TRUE(comp_instance);
+  wasm_component_deinstantiate(comp_instance);
+
+  char file_name_3[] = "wasi_server.wasm";
+  component = load_component_from_candidates(file_name_3);
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+  comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+
+  // West wasi functions are found correctly
+
+  ASSERT_EQ(comp_instance->component_instances[1]->types[0]->type, COMPONENT_VAL_TYPE_RESOURCE_SYNC);
+  ASSERT_FALSE(strcmp(comp_instance->component_instances[1]->types[0]->type_specific.resource->name, "output-stream"));
+  ASSERT_FALSE(strcmp(comp_instance->component_instances[1]->types[0]->type_specific.resource->interface_name, "wasi:io/streams@0.2.4"));
+  // Test resource drop method is found correctly
+  ASSERT_TRUE(comp_instance->component_instances[1]->types[0]->type_specific.resource->drop_method);
+  // Test wasi function is found correctly
+  ASSERT_TRUE(comp_instance->component_instances[1]->functions[0]->core_func->u.func_import->func_ptr_linked );
+
+  ASSERT_TRUE(comp_instance);
+  wasm_component_deinstantiate(comp_instance);
+}
+
+TEST_F(ComponentInstantiationTest, TestModuleSwitchExecution)
+{
+  bool status;
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_VERBOSE);
+
+  const char *path = nullptr;
+  unsigned char *buf = nullptr;
+  char file_name[] = "surface_and_geometry_0_2_0.wasm";
+  WASMComponent *component = load_component_from_candidates(file_name);
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component);
+
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  uint32 argc1 = 0;
+  uint32 *argv1 = (uint32 *)wasm_runtime_malloc(sizeof(uint32) * 10);
+  ASSERT_TRUE(argv1 != NULL);
+  status = wasm_component_application_execute_func_ex(comp_instance, (char *)"circle-area({x:0.0,y:0.0},{x:2.0,y:0.0})", &argc1, &argv1);
+  ASSERT_TRUE(status);
+
+}
+
+TEST_F(ComponentInstantiationTest, TestTypesInstantiation)
+{
+  bool status;
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_VERBOSE);
+
+  const char *path = nullptr;
+  unsigned char *buf = nullptr;
+
+  char file_name[] = "complex.wasm";
+  WASMComponent *component = load_component_from_candidates(file_name);
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component);
+
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  char file_name_2[] = "processor_and_logging_merged_wac_plug.wasm";
+  WASMComponent *component_2 = load_component_from_candidates(file_name_2);
+  ASSERT_NE(component_2, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component_2);
+
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance_2 = wasm_component_instantiate_internal(component_2, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance_2);
+
+  // Test record type instantiation
+  ASSERT_EQ(comp_instance->types[16]->type, COMPONENT_VAL_TYPE_RECORD);
+  ASSERT_EQ(comp_instance->types[16]->type_specific.record->count, 2);
+  ASSERT_EQ(comp_instance->types[16]->type_specific.record->fields[0].type->type_specific.primval, WASM_COMP_PRIMVAL_STRING);
+  ASSERT_FALSE(strcmp(comp_instance->types[16]->type_specific.record->fields[0].label->name, "name"));
+  ASSERT_EQ(comp_instance->types[16]->type_specific.record->fields[1].type->type_specific.primval, WASM_COMP_PRIMVAL_U32);
+  ASSERT_FALSE(strcmp(comp_instance->types[16]->type_specific.record->fields[1].label->name, "age"));
+
+  // Test variant type instantiation
+  ASSERT_EQ(comp_instance->types[18]->type, COMPONENT_VAL_TYPE_VARIANT);
+  ASSERT_EQ(comp_instance->types[18]->type_specific.record->count, 2);
+  ASSERT_EQ(comp_instance->types[18]->type_specific.record->fields[0].type->type_specific.primval, WASM_COMP_PRIMVAL_F32);
+  ASSERT_FALSE(strcmp(comp_instance->types[18]->type_specific.record->fields[0].label->name, "circle"));
+  ASSERT_EQ(comp_instance->types[18]->type_specific.record->fields[1].type->type, COMPONENT_VAL_TYPE_TUPLE);
+  ASSERT_FALSE(strcmp(comp_instance->types[18]->type_specific.record->fields[1].label->name, "rectangle"));
+
+  // Test list type instantiation
+  ASSERT_EQ(comp_instance->types[26]->type, COMPONENT_VAL_TYPE_LIST);
+  ASSERT_EQ(comp_instance->types[26]->type_specific.list->element_type->type_specific.primval, WASM_COMP_PRIMVAL_S32);
+
+ // Test tuple type instantiation
+  ASSERT_EQ(comp_instance->types[17]->type, COMPONENT_VAL_TYPE_TUPLE);
+  ASSERT_EQ(comp_instance->types[17]->type_specific.tuple->element_types[0]->type_specific.primval, WASM_COMP_PRIMVAL_F32);
+  ASSERT_EQ(comp_instance->types[17]->type_specific.tuple->element_types[1]->type_specific.primval, WASM_COMP_PRIMVAL_F32);
+
+  // Test flags type instantiation
+  ASSERT_EQ(comp_instance_2->types[13]->type_specific.instance->types[31]->type , COMPONENT_VAL_TYPE_FLAGS);
+  ASSERT_EQ(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->count, 6);
+  ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[0].name, "read"));
+  ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[1].name, "write"));
+  ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[2].name, "file-integrity-sync"));
+  ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[3].name, "data-integrity-sync"));
+  ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[4].name, "requested-write-sync"));
+  ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[5].name, "mutate-directory"));
+
+  // Test enum type instantiation
+  ASSERT_EQ(comp_instance_2->component_instances[13]->types[24]->type, COMPONENT_VAL_TYPE_ENUM);
+  ASSERT_EQ(comp_instance_2->component_instances[13]->types[24]->type_specific.enum_type->count, 3);
+  ASSERT_FALSE(strcmp(comp_instance_2->component_instances[13]->types[24]->type_specific.enum_type->labels[0].name, "info"));
+  ASSERT_FALSE(strcmp(comp_instance_2->component_instances[13]->types[24]->type_specific.enum_type->labels[1].name, "warning"));
+  ASSERT_FALSE(strcmp(comp_instance_2->component_instances[13]->types[24]->type_specific.enum_type->labels[2].name, "error"));
+
+  // Test option type instantiation
+  ASSERT_EQ(comp_instance->types[34]->type, COMPONENT_VAL_TYPE_OPTION);
+  ASSERT_EQ(comp_instance->types[34]->type_specific.option->element_type->type_specific.primval, WASM_COMP_PRIMVAL_STRING);
+
+  // Test result type instantiation
+  ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[8]->type, COMPONENT_VAL_TYPE_RESULT);
+  ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[8]->type_specific.result->error_type->type, COMPONENT_VAL_TYPE_VARIANT);
+  ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[8]->type_specific.result->error_type->type_specific.variant->count, 2);
+  ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[8]->type_specific.result->result_type->type_specific.primval, WASM_COMP_PRIMVAL_U64);
+
+  // Test own type instantiation
+  ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[4]->type, COMPONENT_VAL_TYPE_OWN);
+  ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[4]->type_specific.resource_handle->is_borrow, false);
+  ASSERT_FALSE(strcmp(comp_instance->types[2]->type_specific.instance->types[4]->type_specific.resource_handle->resource->name, "error"));
+
+  // Test borrow type instantiation
+  ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[7]->type, COMPONENT_VAL_TYPE_BORROW);
+  ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[7]->type_specific.resource_handle->is_borrow, true);
+  ASSERT_FALSE(strcmp(comp_instance->types[2]->type_specific.instance->types[7]->type_specific.resource_handle->resource->name, "output-stream"));
+
+  // Test resource type instantiation
+  ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[2]->type, COMPONENT_VAL_TYPE_RESOURCE_SYNC);
+  ASSERT_FALSE(strcmp(comp_instance->types[2]->type_specific.instance->types[2]->type_specific.resource->name , "output-stream"));
+  ASSERT_FALSE(strcmp(comp_instance->types[2]->type_specific.instance->types[2]->type_specific.resource->interface_name, "wasi:io/streams@0.2.3"));
+  ASSERT_TRUE(comp_instance->types[2]->type_specific.instance->types[2]->type_specific.resource->drop_method);
+
+
+}
 
 TEST_F(ComponentInstantiationTest, TestInstantiateSmokeTest)
 {
   std::vector<std::string> component_files = {
+    "complex.wasm",
+    "hello_wasi.wasm",
     "hello_wasip1_hacked.component.wasm",
+    "logging_service.component.wasm",
+    "processor_and_logging_merged_wac_plug.wasm",
     "surface_and_geometry_0_2_0.wasm",
     "surface_and_geometry.wasm",
+    "wasi_server.wasm",
+    "wasip2_tcp_server.wasm",
     "add.wasm",
+    "sampletypes.wasm"
   };
 
   WASMComponent *component;

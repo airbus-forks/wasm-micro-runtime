@@ -226,6 +226,29 @@ TEST_F(CanonicalExecutionTest, test_hello_rust)
   ASSERT_TRUE(status);
 }
 
+TEST_F(CanonicalExecutionTest, test_wasi_server)
+{
+  bool status;
+
+  WASMComponent *component = LoadfromCandidates("wasi_server.wasm");
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component);
+  libc_component_wasi_init(component, 0, NULL, &parse_ctx);
+
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+
+  char func_name[] = "run()";
+  printf("Execute wasi_server.wasm:\n\n");
+
+  status = wasm_component_application_execute_func(comp_instance, func_name);
+  ASSERT_TRUE(status);
+}
+
 TEST_F(CanonicalExecutionTest, test_surface)
 {
   bool status;
@@ -291,6 +314,7 @@ TEST_F(CanonicalExecutionTest, test_wasi_clocks)
   status = wasm_component_application_execute_func(comp_instance, func_name);
   ASSERT_TRUE(status);
 }
+
 
 TEST_F(CanonicalExecutionTest, test_wasi_cli)
 {
@@ -430,6 +454,169 @@ TEST_F(CanonicalExecutionTest, test_wasi_cli_inherit_env)
   ASSERT_TRUE(i > 13);
 }
 
+
+TEST_F(CanonicalExecutionTest, test_tcp_server)
+{
+  bool status;
+
+  WASMComponent *component = LoadfromCandidates("tcp_server.wasm");
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component);
+
+  libc_component_wasi_init(component, 0, NULL, &parse_ctx);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+
+  FILE *output_file = freopen(output_path, "w", stdout);
+  ASSERT_TRUE(output_file);
+
+  char command[128];
+    // This command finds the PID using the port and kills it.
+    // We redirect stderr to /dev/null so it doesn't complain if the port is already free.
+    uint32_t port = 7878;
+    sprintf(command, "lsof -t -i:%d | xargs kill -9 > /dev/null 2>&1", port);
+
+    printf("[Setup] Cleaning up port %d...\n", port);
+    system(command);
+
+  pid_t pid = fork();
+
+  ASSERT_TRUE(pid >= 0);
+
+  if (pid == 0) {
+      // --- CHILD PROCESS: tcp-server ---
+    char func_name[] = "run()";
+    wasm_component_application_execute_func(comp_instance, func_name);
+
+  } else {
+
+    usleep(500000);
+    printf("[Parent] Connecting via native sockets...\n");
+
+    // Create socket, configure address, and connect
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT_TRUE(sock >= 0);
+
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(7878);
+    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+
+    // Connect to the server
+    int connection_status = connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+    printf("Errno: %d\n", errno);
+
+    ASSERT_TRUE(connection_status == 0);
+
+    // Send 2 messages
+    const char *msg1 = "Message 1: Hello Server!\n";
+    send(sock, msg1, strlen(msg1), 0);
+
+    sleep(1);
+
+    const char *msg2 = "Message 2: Testing complete.\n";
+    send(sock, msg2, strlen(msg2), 0);
+    sleep(1);
+
+    // Cleanup
+    kill(pid, SIGTERM);
+    waitpid(pid, NULL, 0);
+
+    printf("[Parent] Messages sent. Cleaning up...\n");
+
+  }
+
+  FILE *output = fopen(output_path, "r");
+  ASSERT_TRUE(output);
+
+  char line[256][256];
+  uint32_t i = 0;
+  while(fgets(line[i], sizeof(line[i]), output)) i++;
+
+  ASSERT_TRUE(strstr(line[0], "TCP Server listening on 127.0.0.1:7878")); //connection estabilished by server
+  ASSERT_TRUE(strstr(line[1], "New connection established from: 127.0.0.1")); // received incoming connection
+  ASSERT_TRUE(strstr(line[2], "Received from 127.0.0.1")); // first message received
+  ASSERT_TRUE(strstr(line[2], "Message 1: Hello Server!")); // echoed back first message
+  ASSERT_TRUE(strstr(line[3], "Received from 127.0.0.1")); // second message received
+  ASSERT_TRUE(strstr(line[3], "Message 2: Testing complete.")); // echoed back second message
+
+}
+
+TEST_F(CanonicalExecutionTest, test_udp_server)
+{
+  bool status;
+
+  WASMComponent *component_1 = LoadfromCandidates("udp_server_2.wasm");
+  ASSERT_NE(component_1, nullptr) << "Failed to load/parse component from candidates.";
+
+  libc_component_wasi_init(component_1, 0, NULL, &parse_ctx);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance_1 = wasm_component_instantiate_internal(component_1, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance_1);
+
+  WASMComponent *component_2 = LoadfromCandidates("udp_client_2.wasm");
+  ASSERT_NE(component_2, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component_2);
+  char *argv[2] = {(char *)"-n", (char *)"5"};
+
+  libc_component_wasi_init(component_2, 2, argv, &parse_ctx);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance_2 = wasm_component_instantiate_internal(component_2, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance_2);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+
+  char func_name[] = "run()";
+
+  pid_t pid = fork();
+
+  ASSERT_TRUE(pid >= 0);
+
+  if (pid == 0) {
+
+    wasm_component_application_execute_func(comp_instance_1, func_name);
+
+  } else {
+
+    // Redirect client output to log file
+    FILE *output_file = freopen(output_path, "w", stdout);
+    ASSERT_TRUE(output_file);
+    // --- Parent PROCESS: udp-client ---
+    char line[256];
+
+    usleep(500000); // 0.5 seconds
+
+    wasm_component_application_execute_func(comp_instance_2, func_name);
+    kill(pid, SIGTERM);
+    waitpid(pid, NULL, 0);
+
+  }
+
+  FILE *output = fopen(output_path, "r");
+  ASSERT_TRUE(output);
+
+  char line[256][256];
+  uint32_t i = 0;
+  while(fgets(line[i], sizeof(line[i]), output)) i++;
+
+  ASSERT_TRUE(strstr(line[0], "Sending 5 messages to 127.0.0.1:9090")); // client connected and sending to server
+  ASSERT_TRUE(strstr(line[2], "Received echo: Message 1/5")); // first message received by server
+  ASSERT_TRUE(strstr(line[10], "Received echo: Message 5/5")); // last message received by server
+  ASSERT_TRUE(strstr(line[11], "Done")); // Transmission done
+
+}
+
 TEST_F(CanonicalExecutionTest, test_wasi_filesystem)
 {
   bool status;
@@ -455,6 +642,46 @@ TEST_F(CanonicalExecutionTest, test_wasi_filesystem)
   char func_name[] = "run()";
   status = wasm_component_application_execute_func(comp_instance, func_name);
   ASSERT_TRUE(status);
+}
+
+TEST_F(CanonicalExecutionTest, test_wasi_ip_name_lookup)
+{
+  bool status;
+
+  WASMComponent *component = LoadfromCandidates("ip_name_lookup_local.wasm");
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component);
+
+  libc_component_wasi_init(component, 0, NULL, &parse_ctx);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  init_prestats(comp_instance);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+
+    // Redirect output to log file
+  FILE *output_file = freopen(output_path, "w", stdout);
+  ASSERT_TRUE(output_file);
+
+  char func_name[] = "run()";
+  status = wasm_component_application_execute_func(comp_instance, func_name);
+  ASSERT_TRUE(status);
+
+  FILE *output = fopen(output_path, "r");
+  ASSERT_TRUE(output);
+
+  char line[256][256];
+  uint32_t i = 0;
+  while(fgets(line[i], sizeof(line[i]), output)) i++;
+
+  ASSERT_TRUE(strstr(line[0], "Resolving: localhost"));
+  ASSERT_TRUE(strstr(line[1], "-> 127.0.0.1")); // address found
+  ASSERT_TRUE(strstr(line[2], "Resolved 1 address(es) for localhost"));
 }
 
 // Test apps made with C WASi-SDK
@@ -579,6 +806,167 @@ TEST_F(CanonicalExecutionTest, test_wasi_filesystem_c)
   char func_name[] = "run()";
   status = wasm_component_application_execute_func(comp_instance, func_name);
   ASSERT_TRUE(status);
+}
+
+
+TEST_F(CanonicalExecutionTest, test_tcp_server_c)
+{
+  bool status;
+
+  WASMComponent *component = LoadfromCandidates("tcp_server_c.wasm");
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component);
+
+  libc_component_wasi_init(component, 0, NULL, &parse_ctx);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+
+  FILE *output_file = freopen(output_path, "w", stdout);
+  ASSERT_TRUE(output_file);
+
+  char command[128];
+    // This command finds the PID using the port and kills it.
+    // We redirect stderr to /dev/null so it doesn't complain if the port is already free.
+    uint32_t port = 8080;
+    sprintf(command, "lsof -t -i:%d | xargs kill -9 > /dev/null 2>&1", port);
+
+    printf("[Setup] Cleaning up port %d...\n", port);
+    system(command);
+
+  pid_t pid = fork();
+
+  ASSERT_TRUE(pid >= 0);
+
+  if (pid == 0) {
+      // --- CHILD PROCESS: tcp-server ---
+    char func_name[] = "run()";
+    wasm_component_application_execute_func(comp_instance, func_name);
+
+  } else {
+    usleep(500000);
+
+    printf("[Parent] Connecting via native sockets...\n");
+
+    // Create socket, configure address, and connect
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT_TRUE(sock >= 0);
+
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(8080);
+    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+
+    // Connect to the server
+    int connection_status = connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+    ASSERT_TRUE(connection_status == 0);
+
+    // Send 2 messages
+    const char *msg1 = "Message 1: Hello Server!\n";
+    send(sock, msg1, strlen(msg1), 0);
+
+    sleep(1);
+
+    const char *msg2 = "Message 2: Testing complete.\n";
+    send(sock, msg2, strlen(msg2), 0);
+    sleep(1);
+
+    // Cleanup
+    kill(pid, SIGTERM);
+    waitpid(pid, NULL, 0);
+
+    printf("[Parent] Messages sent. Cleaning up...\n");
+
+  }
+}
+
+
+TEST_F(CanonicalExecutionTest, test_udp_server_c)
+{
+  bool status;
+
+  WASMComponent *component = LoadfromCandidates("udp_server_c.wasm");
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+
+  ASSERT_TRUE(component);
+
+  libc_component_wasi_init(component, 0, NULL, &parse_ctx);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
+
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_WARNING);
+
+  FILE *output_file = freopen(output_path, "w", stdout);
+  ASSERT_TRUE(output_file);
+
+   sleep(1);
+
+  printf("Here\n");
+  fflush(stdout);
+
+  pid_t pid = fork();
+
+  ASSERT_TRUE(pid >= 0);
+
+  if (pid == 0) {
+
+    char command[128];
+    // This command finds the PID using the port and kills it.
+    // We redirect stderr to /dev/null so it doesn't complain if the port is already free.
+    uint32_t port = 8080;
+    sprintf(command, "lsof -t -i:%d | xargs kill -9 > /dev/null 2>&1", port);
+
+     sleep(1);
+
+    printf("[Setup] Cleaning up port %d...\n", port);
+    system(command);
+
+    fflush(stdout);
+
+    printf("running server\n");
+    fflush(stdout);
+      // --- CHILD PROCESS: udp-server ---
+    char func_name[] = "run()";
+    wasm_component_application_execute_func(comp_instance, func_name);
+  }
+  else {
+    usleep(500000);
+    //  Create socket and configure address
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    ASSERT_TRUE(sock >= 0);
+
+    int sent_bytes = 0;
+
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(8080);
+    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+
+    // Send 2 messages
+    const char *msg1 = "Message 1: Hello Server!\n";
+    sent_bytes = sendto(sock, msg1, 26, 0, (const struct sockaddr *)&serv_addr, sizeof(serv_addr));
+    printf("Sent message %s\n", msg1);
+    ASSERT_TRUE(sent_bytes);
+
+    const char *msg2 = "Message 2: Testing complete.\n";
+    sendto(sock, msg2, 30, 0, (const struct sockaddr *)&serv_addr, sizeof(serv_addr));
+
+    sleep(1);
+
+    kill(pid, SIGTERM);
+    waitpid(pid, NULL, 0);
+
+    printf("[Parent] Messages sent. Cleaning up...\n");
+
+  }
 }
 
 TEST_F(CanonicalExecutionTest, test_wasi_filesystem_sandboxing)

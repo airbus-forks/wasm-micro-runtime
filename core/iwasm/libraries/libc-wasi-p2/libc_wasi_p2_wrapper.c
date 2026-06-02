@@ -10,6 +10,7 @@
 #include "wasi_p2_filesystem_wrapper.h"
 #include "wasi_p2_random_wrapper.h"
 #include "wasi_p2_io_wrapper.h"
+#include "wasi_p2_sockets_wrapper.h"
 #include "wasm_export.h"
 #include <errno.h>
 
@@ -260,6 +261,158 @@ static NativeSymbol io_streams_symbols[] = {
                          "(iiIi)"),
 };
 
+static NativeSymbol sockets_instance_network_symbols[] = {
+    REG_WASI_P2_FUNCTION("instance-network",
+                         wasi_sockets_instance_network_instance_network, "()i"),
+};
+
+static NativeSymbol sockets_ip_name_lookup_symbols[] = {
+    REG_WASI_P2_FUNCTION("resolve-addresses",
+                         wasi_sockets_ip_name_lookup_resolve_addresses,
+                         "(ii~i)"),
+    REG_WASI_P2_FUNCTION(
+        "[method]resolve-address-stream.resolve-next-address",
+        wasi_sockets_ip_name_lookup_resolve_address_stream_resolve_next_address,
+        "(ii)"),
+    REG_WASI_P2_FUNCTION(
+        "[method]resolve-address-stream.subscribe",
+        wasi_sockets_ip_name_lookup_resolve_address_stream_subscribe, "(i)"),
+};
+
+static NativeSymbol sockets_tcp_create_socket_symbols[] = {
+    REG_WASI_P2_FUNCTION("create-tcp-socket",
+                         wasi_sockets_tcp_create_socket_create_tcp_socket,
+                         "(ii)"),
+};
+
+static NativeSymbol sockets_tcp_symbols[] = {
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.start-bind",
+                         wasi_sockets_tcp_tcp_socket_start_bind,
+                         "(iiiiiiiiiiiiiii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.finish-bind",
+                         wasi_sockets_tcp_tcp_socket_finish_bind, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.start-connect",
+                         wasi_sockets_tcp_tcp_socket_start_connect,
+                         "(iiiiiiiiiiiiiii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.finish-connect",
+                         wasi_sockets_tcp_tcp_socket_finish_connect, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.start-listen",
+                         wasi_sockets_tcp_tcp_socket_start_listen, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.finish-listen",
+                         wasi_sockets_tcp_tcp_socket_finish_listen, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.accept",
+                         wasi_sockets_tcp_tcp_socket_accept, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.local-address",
+                         wasi_sockets_tcp_tcp_socket_local_address, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.remote-address",
+                         wasi_sockets_tcp_tcp_socket_remote_address, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.is-listening",
+                         wasi_sockets_tcp_tcp_socket_is_listening, "(i)i"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.address-family",
+                         wasi_sockets_tcp_tcp_socket_address_family, "(i)i"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.set-listen-backlog-size",
+                         wasi_sockets_tcp_tcp_socket_set_listen_backlog_size,
+                         "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.keep-alive-enabled",
+                         wasi_sockets_tcp_tcp_socket_keep_alive_enabled,
+                         "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.set-keep-alive-enabled",
+                         wasi_sockets_tcp_tcp_socket_set_keep_alive_enabled,
+                         "(iii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.keep-alive-idle-time",
+                         wasi_sockets_tcp_tcp_socket_keep_alive_idle_time,
+                         "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.set-keep-alive-idle-time",
+                         wasi_sockets_tcp_tcp_socket_set_keep_alive_idle_time,
+                         "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.keep-alive-interval",
+                         wasi_sockets_tcp_tcp_socket_keep_alive_interval,
+                         "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.set-keep-alive-interval",
+                         wasi_sockets_tcp_tcp_socket_set_keep_alive_interval,
+                         "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.keep-alive-count",
+                         wasi_sockets_tcp_tcp_socket_keep_alive_count, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.set-keep-alive-count",
+                         wasi_sockets_tcp_tcp_socket_set_keep_alive_count,
+                         "(iii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.hop-limit",
+                         wasi_sockets_tcp_tcp_socket_hop_limit, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.set-hop-limit",
+                         wasi_sockets_tcp_tcp_socket_set_hop_limit, "(iii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.receive-buffer-size",
+                         wasi_sockets_tcp_tcp_socket_receive_buffer_size,
+                         "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.set-receive-buffer-size",
+                         wasi_sockets_tcp_tcp_socket_set_receive_buffer_size,
+                         "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.send-buffer-size",
+                         wasi_sockets_tcp_tcp_socket_send_buffer_size, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.set-send-buffer-size",
+                         wasi_sockets_tcp_tcp_socket_set_send_buffer_size,
+                         "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.subscribe",
+                         wasi_sockets_tcp_tcp_socket_subscribe, "(i)i"),
+    REG_WASI_P2_FUNCTION("[method]tcp-socket.shutdown",
+                         wasi_sockets_tcp_tcp_socket_shutdown, "(iii)"),
+};
+
+static NativeSymbol sockets_udp_create_socket_symbols[] = {
+    REG_WASI_P2_FUNCTION("create-udp-socket",
+                         wasi_sockets_udp_create_socket_create_udp_socket,
+                         "(ii)"),
+};
+
+static NativeSymbol sockets_udp_symbols[] = {
+    REG_WASI_P2_FUNCTION("[method]udp-socket.start-bind",
+                         wasi_sockets_udp_udp_socket_start_bind,
+                         "(iiiiiiiiiiiiiii)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.finish-bind",
+                         wasi_sockets_udp_udp_socket_finish_bind, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.stream",
+                         wasi_sockets_udp_udp_socket_stream,
+                         "(iiiiiiiiiiiiiii)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.local-address",
+                         wasi_sockets_udp_udp_socket_local_address, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.remote-address",
+                         wasi_sockets_udp_udp_socket_remote_address, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.address-family",
+                         wasi_sockets_udp_udp_socket_address_family, "(i)i"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.unicast-hop-limit",
+                         wasi_sockets_udp_udp_socket_unicast_hop_limit, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.set-unicast-hop-limit",
+                         wasi_sockets_udp_udp_socket_set_unicast_hop_limit,
+                         "(iii)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.receive-buffer-size",
+                         wasi_sockets_udp_udp_socket_receive_buffer_size,
+                         "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.set-receive-buffer-size",
+                         wasi_sockets_udp_udp_socket_set_receive_buffer_size,
+                         "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.send-buffer-size",
+                         wasi_sockets_udp_udp_socket_send_buffer_size, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.set-send-buffer-size",
+                         wasi_sockets_udp_udp_socket_set_send_buffer_size,
+                         "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]udp-socket.subscribe",
+                         wasi_sockets_udp_udp_socket_subscribe, "(i)i"),
+    REG_WASI_P2_FUNCTION("[method]incoming-datagram-stream.receive",
+                         wasi_sockets_udp_incoming_datagram_stream_receive,
+                         "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]incoming-datagram-stream.subscribe",
+                         wasi_sockets_udp_incoming_datagram_stream_subscribe,
+                         "(i)i"),
+    REG_WASI_P2_FUNCTION("[method]outgoing-datagram-stream.check-send",
+                         wasi_sockets_udp_outgoing_datagram_stream_check_send,
+                         "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]outgoing-datagram-stream.send",
+                         wasi_sockets_udp_outgoing_datagram_stream_send,
+                         "(ii~i)"),
+    REG_WASI_P2_FUNCTION("[method]outgoing-datagram-stream.subscribe",
+                         wasi_sockets_udp_outgoing_datagram_stream_subscribe,
+                         "(i)i"),
+};
+
 static wasi_p2_module_t wasi_p2_modules[] = {
     WASI_P2_MODULE(cli_environment, "cli/environment", "0.2.0"),
     WASI_P2_MODULE(cli_exit, "cli/exit", "0.2.0"),
@@ -279,6 +432,15 @@ static wasi_p2_module_t wasi_p2_modules[] = {
     WASI_P2_MODULE(io_error, "io/error", "0.2.0"),
     WASI_P2_MODULE(io_poll, "io/poll", "0.2.0"),
     WASI_P2_MODULE(io_streams, "io/streams", "0.2.0"),
+    WASI_P2_MODULE(sockets_instance_network, "sockets/instance-network",
+                   "0.2.0"),
+    WASI_P2_MODULE(sockets_ip_name_lookup, "sockets/ip-name-lookup", "0.2.0"),
+    WASI_P2_MODULE(sockets_tcp_create_socket, "sockets/tcp-create-socket",
+                   "0.2.0"),
+    WASI_P2_MODULE(sockets_tcp, "sockets/tcp", "0.2.0"),
+    WASI_P2_MODULE(sockets_udp_create_socket, "sockets/udp-create-socket",
+                   "0.2.0"),
+    WASI_P2_MODULE(sockets_udp, "sockets/udp", "0.2.0"),
 };
 
 static bool
