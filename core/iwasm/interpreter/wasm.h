@@ -13,6 +13,10 @@
 #include "gc_export.h"
 #endif
 
+#if WASM_ENABLE_LIBC_WASI != 0 && WASM_ENABLE_COMPONENT_MODEL != 0
+typedef struct libc_wasi_options_t libc_wasi_options_t;
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

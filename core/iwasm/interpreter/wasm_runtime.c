@@ -178,12 +178,14 @@ wasm_resolve_import_func(const WASMModule *module, WASMFunctionImport *function)
     if (function->func_ptr_linked) {
         return true;
     }
+
 #if WASM_ENABLE_COMPONENT_MODEL != 0
     if (is_component_runtime()) {
         return true;
     }
 #endif
 #if WASM_ENABLE_MULTI_MODULE != 0
+
     if (!wasm_runtime_is_built_in_module(function->module_name)) {
         sub_module = (WASMModule *)wasm_runtime_load_depended_module(
             (WASMModuleCommon *)module, function->module_name, error_buf,
@@ -1581,19 +1583,19 @@ export_tags_instantiate(const WASMModule *module,
 }
 #endif /* end of WASM_ENABLE_TAGS != 0 */
 
-static void
-export_tables_deinstantiate(WASMExportTabInstance *tables)
-{
-    if (tables)
-        wasm_runtime_free(tables);
-}
-
-#if WASM_ENABLE_MULTI_MEMORY != 0 || WASM_ENABLE_COMPONENT_MODEL != 0
+#if WASM_ENABLE_MULTI_MEMORY != 0
 static void
 export_memories_deinstantiate(WASMExportMemInstance *memories)
 {
     if (memories)
         wasm_runtime_free(memories);
+}
+
+static void
+export_tables_deinstantiate(WASMExportTabInstance *tables)
+{
+    if (tables)
+        wasm_runtime_free(tables);
 }
 
 static WASMExportMemInstance *
@@ -2669,7 +2671,7 @@ wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
 
     /* export */
     module_inst->export_func_count = get_export_count(module, EXPORT_KIND_FUNC);
-#if WASM_ENABLE_MULTI_MEMORY != 0 || WASM_ENABLE_COMPONENT_MODEL != 0
+#if WASM_ENABLE_MULTI_MEMORY != 0
     module_inst->export_memory_count =
         get_export_count(module, EXPORT_KIND_MEMORY);
 #endif
@@ -2719,7 +2721,7 @@ wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
                      module, module_inst, module_inst->export_global_count,
                      error_buf, error_buf_size)))
 #endif
-#if WASM_ENABLE_MULTI_MEMORY != 0 || WASM_ENABLE_COMPONENT_MODEL != 0
+#if WASM_ENABLE_MULTI_MEMORY != 0
         || (module_inst->export_memory_count > 0
             && !(module_inst->export_memories = export_memories_instantiate(
                      module, module_inst, module_inst->export_memory_count,

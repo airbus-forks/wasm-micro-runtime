@@ -42,3 +42,4 @@ add_custom_target(
                   -n test_aot
                   ${CMAKE_CURRENT_BINARY_DIR}/test.aot
 )
+

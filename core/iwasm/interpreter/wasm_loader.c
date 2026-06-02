@@ -7219,6 +7219,7 @@ check_wasi_abi_compatibility(const WASMModule *module,
     if (!module->import_wasi_api && !start && !initialize) {
         return true;
     }
+
 #if WASM_ENABLE_COMPONENT_MODEL != 0
     /* should have one at least */
     if (module->import_wasi_api && !start && !initialize) {
@@ -7227,6 +7228,7 @@ check_wasi_abi_compatibility(const WASMModule *module,
                         "a command or a reactor");
     }
 #endif
+
     /*
      * there is at least one of `_start` and `_initialize` in below cases.
      * according to the assumption, they should be all wasi compatible

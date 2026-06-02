@@ -162,7 +162,7 @@ These index spaces are populated by iterating over the `WASMComponent` sections 
 ## Canonical ABI overview
 
 Canonical ABI defines the rules to convert between the values and functions of components in the `Component Model` and the values and functions of modules in `Core WebAssembly`.
-The Canonical ABI specifies, for each component function signature, a corresponding core function signature and the process for reading component-level values into and out of linear memory.
+The Canonical ABI specifies, for each component function signature, a corresponding core function signature and the process for reading component-level values into and out of linear memory. 
 
 Most Canonical ABI definitions depend on some ambient information which is established by the `canon lift` or `canon lower`.
 
@@ -206,9 +206,64 @@ WAMR implements the Canonical ABI using a strict, bottom-up four-layer architect
 4.  **Layer 4: Function Wrappers (`canon_lift` / `canon_lower`):** The highest level intercepts cross-boundary function calls. It orchestrates the full lifecycle: lowering parameters, executing the target function, lifting the results, and returning them.
 
 **The Flattening Optimization**
-To maximize execution speed, WAMR implements the Canonical ABI's "flattening" optimization rule.
+To maximize execution speed, WAMR implements the Canonical ABI's "flattening" optimization rule. 
 * **Small payloads** (up to 16 parameters or 1 result in sync mode) are "flattened" and passed directly as individual core Wasm function parameters (e.g., `i32`, `i64`, `f32`, or `f64` values on the Wasm stack). This avoids the overhead of linear memory allocation. While WebAssembly itself is a stack-based machine without registers, passing flat parameters allows AOT or JIT compilers to efficiently optimize and map these values directly into native machine registers during execution.
 * **Large payloads** (like records exceeding the parameter limit) bypass this flattening process. Instead, they are written to linear memory, and only a single `i32` pointer to that memory block is passed on the stack.
 
 **Context and Memory Management**
 To keep the layers modular and future-proof for asynchronous execution, configuration is passed through a tiered context structure (`LiftLowerContext`). Operations that only read memory use a base `LiftOptions` context, while operations requiring memory modification use `LiftLowerOptions` (which includes the `realloc` allocator). The topmost function wrappers use a full `CanonicalOptions` context, which manages execution state (sync/async) and callbacks.
+
+### Cross-Component Call Architecture
+
+When one component invokes an imported function that is implemented by another component, WAMR acts as the embedder, bridging the two isolated linear memories through the Canonical ABI.
+
+<center><img src="./pics/cross_component_call_hld.png" width="70%" height="70%"></img></center>
+
+- Initialization: Every cross-component call establishes a Task (representing the callee's execution context) and a Subtask (representing the caller's context and safely managing borrowed resources).
+- The First Bridge (Arguments): The embedder Lifts the low-level data out of Component 1's memory space into a neutral, high-level intermediate representation (wit_value_t), then immediately Lowers that data into Component 2's memory space, invoking Component 2's allocator if necessary.
+- The Second Bridge (Results): After Component 2 executes, the exact reverse happens. The embedder Lifts Component 2's low-level output into the neutral format, then Lowers it back into Component 1's memory space.
+- Cleanup: The Task and Subtask are validated to ensure no resources were illegally held, optional memory cleanup (post_return) runs on the callee, and execution control is handed back to the caller.
+
+### Resource Management
+
+The Component Model introduces the concept of **Resources**, which provide a safe, capability-based way to pass opaque handles between a component and the host (or between components). WAMR fully implements this system, enabling structured access to external states.
+
+**Host and Component Resources**
+WAMR supports both component-defined resources and **host resources**. Through host resources, a Wasm component can securely interact with underlying host-level entities—such as files, directories, and network sockets—without the host needing to expose raw pointers or internal memory layouts. The runtime manages the translation and mapping of these handles across the ABI boundary.
+
+**Ownership Model: `own` vs `borrow`**
+To guarantee memory safety and proper lifecycle management, the Canonical ABI relies on a strict ownership model. WAMR implements the two primary resource handle types defined by the specification:
+- **`own` (Owned):** The handle represents exclusive ownership of the underlying resource. The receiver of an owned handle assumes full responsibility for its eventual cleanup. 
+- **`borrow` (Borrowed):** The handle represents a temporary, non-owning reference to a resource. The borrower is granted access for the duration of a function call but cannot destroy the resource, as the original owner retains lifecycle responsibility.
+
+**Destructors and Lifecycle**
+WAMR actively tracks the lifecycle of these handles to prevent resource leaks. When a resource handle is explicitly closed or dropped at the end of its execution scope, WAMR evaluates its ownership status to determine the next steps:
+
+* If the dropped handle is an **`own`** resource, WAMR automatically invokes the registered **destructor** for that resource. For host resources, this safely cleans up the underlying system state (e.g., closing a file descriptor, terminating a socket, or freeing memory allocations).
+* If the dropped handle is a **`borrow`** resource, the destructor is **strictly bypassed**. WAMR safely discards the reference without destroying the underlying state, ensuring the resource remains valid for the actual owner.
+
+> **Important Note on Resource Hierarchies:** WAMR does not internally track parent-child relationships between resources. It is strictly the application's responsibility to ensure that all child resources are appropriately dropped before their corresponding parent resource is destroyed.
+
+## Source layout
+
+All component model sources reside in `core/iwasm/common/component-model/`:
+
+```
+component-model/
+  wasm_canonical_abi.h                   # Definitions of wit_value_t.
+  wasm_canonical_abi.c                   # Implementation of constructors for wit_value_t.
+  wasm_component_canon.h                 # Definitions for high level canonical methods. Eg: canon resource new.
+  wasm_component_canon.c                 # Implementation of canonical methods.
+  wasm_component_canonical.h             # Lower level definitions for store/load.
+  wasm_component_canonical.c             # Lower level implementation for storing and loading data. Working directly with linear memory.
+  wasm_component_flat.h                  # Higher level definitions for lift/lower and flat.
+  wasm_component_flat.c                  # Higher level implementation for lifting and lowering values and flattening params.
+  wasm_component_resource.c              # Definitions of a resource
+  wasm_component_resource.h              # Implementing methods to create and destroy a resource
+  wasm_component_host_resource.c         # Defining host resource
+  wasm_component_host_resource.h         # Implementing host resources and helper methods
+  wasm_component_resource_table.h        # Defining component resource table
+  wasm_component_resource_table.c        # Implementing host resource table and helper methods
+  wasm_component_task.h                  # Defining the concept of task and subtask
+  wasm_component_task.c                  # Implementing concept of task and subtask
+```

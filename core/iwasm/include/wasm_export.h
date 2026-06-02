@@ -1344,6 +1344,11 @@ wasm_application_execute_func(wasm_module_inst_t module_inst, const char *name,
 WASM_RUNTIME_API_EXTERN const char *
 wasm_runtime_get_exception(wasm_module_inst_t module_inst);
 
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+WASM_RUNTIME_API_EXTERN const char *
+wasm_component_runtime_get_exception(WASMComponentInstance *comp_inst);
+#endif
+
 /**
  * Set exception info of the WASM module instance.
  *

@@ -24,9 +24,6 @@ typedef struct WASMFunctionInstance WASMFunctionInstance;
 typedef struct WASMMemoryInstance WASMMemoryInstance;
 typedef struct WASMTableInstance WASMTableInstance;
 typedef struct WASMGlobalInstance WASMGlobalInstance;
-#if WASM_ENABLE_TAGS != 0
-typedef struct WASMTagInstance WASMTagInstance;
-#endif
 
 #if WASM_ENABLE_COMPONENT_MODEL != 0
 
@@ -37,6 +34,11 @@ typedef struct CanonicalOptions CanonicalOptions;
 typedef struct WASMComponentResourceInstance WASMComponentResourceInstance;
 
 #include "../common/component-model/wasm_component.h"
+
+#endif
+
+#if WASM_ENABLE_TAGS != 0
+typedef struct WASMTagInstance WASMTagInstance;
 #endif
 
 /**
@@ -239,6 +241,7 @@ struct WASMFunctionInstance {
     /* cell num of consts */
     uint16 const_cell_num;
 #endif
+
     uint16 *local_offsets;
     /* parameter types */
     uint8 *param_types;

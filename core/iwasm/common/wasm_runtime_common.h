@@ -16,6 +16,10 @@
 #include "gc/gc_object.h"
 #endif
 
+#if WASM_ENABLE_LIBC_WASI != 0 && WASM_ENABLE_COMPONENT_MODEL != 0
+typedef struct libc_wasi_options_t libc_wasi_options_t;
+#endif
+
 #if WASM_ENABLE_LIBC_WASI != 0
 #if WASM_ENABLE_UVWASI == 0
 #include "posix.h"
@@ -564,6 +568,9 @@ typedef struct WASIContext {
     char *env_buf;
     char **env_list;
     uint32_t exit_code;
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+    libc_wasi_options_t *wasi_options;
+#endif
 } WASIContext;
 #else
 typedef struct WASIContext {
