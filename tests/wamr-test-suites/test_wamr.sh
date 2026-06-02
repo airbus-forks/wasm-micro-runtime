@@ -459,7 +459,7 @@ function unit_test()
             cmake --build unittest-build
             ctest --test-dir unittest-build --output-on-failure | tee -a ${REPORT_DIR}/unit_test_report.txt
     fi
-    
+
     echo "Finish unit tests"
 }
 

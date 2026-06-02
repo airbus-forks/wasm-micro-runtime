@@ -5,7 +5,10 @@
 
 #include "libc_wasi_p2_wrapper.h"
 #include "wasm_native.h"
+#include "wasi_p2_cli_wrapper.h"
+#include "wasi_p2_clocks_wrapper.h"
 #include "wasi_p2_random_wrapper.h"
+#include "wasi_p2_io_wrapper.h"
 #include "wasm_export.h"
 #include <errno.h>
 
@@ -73,6 +76,56 @@ extern "C" {
             sizeof(name##_symbols) / sizeof(NativeSymbol)      \
     }
 
+static NativeSymbol cli_environment_symbols[] = {
+    REG_WASI_P2_FUNCTION("get-environment", wasi_cli_get_environment, "(i)"),
+    REG_WASI_P2_FUNCTION("get-arguments", wasi_cli_get_arguments, "(i)"),
+    REG_WASI_P2_FUNCTION("initial-cwd", wasi_cli_initial_cwd, "(i)"),
+};
+
+static NativeSymbol cli_exit_symbols[] = {
+    REG_WASI_P2_FUNCTION("exit", wasi_cli_exit, "(i)"),
+};
+
+static NativeSymbol cli_stdin_symbols[] = {
+    REG_WASI_P2_FUNCTION("get-stdin", wasi_cli_get_stdin, "()i"),
+};
+
+static NativeSymbol cli_stdout_symbols[] = {
+    REG_WASI_P2_FUNCTION("get-stdout", wasi_cli_get_stdout, "()i"),
+};
+
+static NativeSymbol cli_stderr_symbols[] = {
+    REG_WASI_P2_FUNCTION("get-stderr", wasi_cli_get_stderr, "()i"),
+};
+
+static NativeSymbol cli_terminal_stdin_symbols[] = {
+    REG_WASI_P2_FUNCTION("get-terminal-stdin", wasi_cli_get_terminal_stdin,
+                         "(i)"),
+};
+
+static NativeSymbol cli_terminal_stdout_symbols[] = {
+    REG_WASI_P2_FUNCTION("get-terminal-stdout", wasi_cli_get_terminal_stdout,
+                         "(i)"),
+};
+
+static NativeSymbol cli_terminal_stderr_symbols[] = {
+    REG_WASI_P2_FUNCTION("get-terminal-stderr", wasi_cli_get_terminal_stderr,
+                         "(i)"),
+};
+
+static NativeSymbol clocks_monotonic_clock_symbols[] = {
+    REG_WASI_P2_FUNCTION("now", wasi_monotonic_clock_now, "()I"),
+    REG_WASI_P2_FUNCTION("resolution", wasi_monotonic_clock_resolution, "()I"),
+    REG_WASI_P2_FUNCTION("subscribe-instant",
+                         wasi_monotonic_clock_subscribe_instant, "(I)i"),
+    REG_WASI_P2_FUNCTION("subscribe-duration",
+                         wasi_monotonic_clock_subscribe_duration, "(I)i"),
+};
+
+static NativeSymbol clocks_wall_clock_symbols[] = {
+    REG_WASI_P2_FUNCTION("now", wasi_wall_clock_now, "(i)"),
+    REG_WASI_P2_FUNCTION("resolution", wasi_wall_clock_resolution, "(i)"),
+};
 static NativeSymbol random_random_symbols[] = {
     REG_WASI_P2_FUNCTION("get-random-bytes", wasi_random_get_random_bytes,
                          "(Ii)"),
@@ -90,10 +143,72 @@ static NativeSymbol random_insecure_seed_symbols[] = {
     REG_WASI_P2_FUNCTION("insecure-seed", wasi_random_insecure_seed, "(i)"),
 };
 
+static NativeSymbol io_error_symbols[] = {
+    REG_WASI_P2_FUNCTION("[method]error.to-debug-string",
+                         wasi_io_error_to_debug_string, "(ii)"),
+};
+
+static NativeSymbol io_poll_symbols[] = {
+    REG_WASI_P2_FUNCTION("[method]pollable.ready", wasi_io_poll_pollable_ready,
+                         "(i)i"),
+    REG_WASI_P2_FUNCTION("[method]pollable.block", wasi_io_poll_pollable_block,
+                         "(i)"),
+    REG_WASI_P2_FUNCTION("poll", wasi_io_poll_poll, "(iii)"),
+};
+
+static NativeSymbol io_streams_symbols[] = {
+    REG_WASI_P2_FUNCTION("[method]input-stream.read",
+                         wasi_io_streams_input_stream_read, "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]input-stream.blocking-read",
+                         wasi_io_streams_input_stream_blocking_read, "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]input-stream.skip",
+                         wasi_io_streams_input_stream_skip, "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]input-stream.blocking-skip",
+                         wasi_io_streams_input_stream_blocking_skip, "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]input-stream.subscribe",
+                         wasi_io_streams_input_stream_subscribe, "(i)i"),
+    REG_WASI_P2_FUNCTION("[method]output-stream.check-write",
+                         wasi_io_streams_output_stream_check_write, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]output-stream.write",
+                         wasi_io_streams_output_stream_write, "(ii~i)"),
+    REG_WASI_P2_FUNCTION("[method]output-stream.blocking-write-and-flush",
+                         wasi_io_streams_output_stream_blocking_write_and_flush,
+                         "(ii~i)"),
+    REG_WASI_P2_FUNCTION("[method]output-stream.flush",
+                         wasi_io_streams_output_stream_flush, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]output-stream.blocking-flush",
+                         wasi_io_streams_output_stream_blocking_flush, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]output-stream.subscribe",
+                         wasi_io_streams_output_stream_subscribe, "(i)i"),
+    REG_WASI_P2_FUNCTION("[method]output-stream.write-zeroes",
+                         wasi_io_streams_output_stream_write_zeroes, "(iIi)"),
+    REG_WASI_P2_FUNCTION(
+        "[method]output-stream.blocking-write-zeroes-and-flush",
+        wasi_io_streams_output_stream_blocking_write_zeroes_and_flush, "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]output-stream.splice",
+                         wasi_io_streams_output_stream_splice, "(iiIi)"),
+    REG_WASI_P2_FUNCTION("[method]output-stream.blocking-splice",
+                         wasi_io_streams_output_stream_blocking_splice,
+                         "(iiIi)"),
+};
+
 static wasi_p2_module_t wasi_p2_modules[] = {
+    WASI_P2_MODULE(cli_environment, "cli/environment", "0.2.0"),
+    WASI_P2_MODULE(cli_exit, "cli/exit", "0.2.0"),
+    WASI_P2_MODULE(cli_stdin, "cli/stdin", "0.2.0"),
+    WASI_P2_MODULE(cli_stdout, "cli/stdout", "0.2.0"),
+    WASI_P2_MODULE(cli_stderr, "cli/stderr", "0.2.0"),
+    WASI_P2_MODULE(cli_terminal_stdin, "cli/terminal-stdin", "0.2.0"),
+    WASI_P2_MODULE(cli_terminal_stdout, "cli/terminal-stdout", "0.2.0"),
+    WASI_P2_MODULE(cli_terminal_stderr, "cli/terminal-stderr", "0.2.0"),
+    WASI_P2_MODULE(clocks_monotonic_clock, "clocks/monotonic-clock", "0.2.0"),
+    WASI_P2_MODULE(clocks_wall_clock, "clocks/wall-clock", "0.2.0"),
     WASI_P2_MODULE(random_random, "random/random", "0.2.0"),
     WASI_P2_MODULE(random_insecure, "random/insecure", "0.2.0"),
     WASI_P2_MODULE(random_insecure_seed, "random/insecure-seed", "0.2.0"),
+    WASI_P2_MODULE(io_error, "io/error", "0.2.0"),
+    WASI_P2_MODULE(io_poll, "io/poll", "0.2.0"),
+    WASI_P2_MODULE(io_streams, "io/streams", "0.2.0"),
 };
 
 static bool

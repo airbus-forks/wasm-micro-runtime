@@ -755,186 +755,71 @@ TEST_F(ComponentInstantiationTest, TestResolveCanons)
   wasm_component_deinstantiate(comp_instance);
 }
 
-//// Blocked for now due to missing wasi imports implementation
-// TEST_F(ComponentInstantiationTest, TestInstantiateInternal)
-// {
-//   uint32 idx;
-//   bool status;
-//   bh_log_set_verbose_level(WASM_LOG_LEVEL_VERBOSE);
+TEST_F(ComponentInstantiationTest, TestInstantiateInternal)
+{
+  uint32 idx;
+  bool status;
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_VERBOSE);
 
-//   const char *path = nullptr;
-//   unsigned char *buf = nullptr;
-//   char file_name[] = "surface_and_geometry_0_2_0.wasm";
-//   WASMComponent *component = load_component_from_candidates(file_name);
-//   ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+  const char *path = nullptr;
+  unsigned char *buf = nullptr;
+  char file_name[] = "surface_and_geometry_0_2_0.wasm";
+  WASMComponent *component = load_component_from_candidates(file_name);
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
 
-//   ASSERT_TRUE(component);
+  ASSERT_TRUE(component);
 
-//   // Test component is instantiated
-//   WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
-//   ASSERT_TRUE(comp_instance);
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
 
-//   char file_name_2[] = "complex.wasm";
-//   WASMComponent *component_2 = load_component_from_candidates(file_name_2);
-//   ASSERT_NE(component_2, nullptr) << "Failed to load/parse component from candidates.";
+  // Test all index spaces are populated correctly
+  ASSERT_EQ(comp_instance->component_instances_count, 5);
+  ASSERT_EQ(comp_instance->components_count, 2);
+  ASSERT_EQ(comp_instance->exports_count, 1);
+  ASSERT_EQ(comp_instance->component_instances[0]->core_functions_count, 3);
+  ASSERT_EQ(comp_instance->component_instances[0]->functions_count , 2);
+  ASSERT_EQ(comp_instance->component_instances[0]->types_count, 4);
+  ASSERT_EQ(comp_instance->component_instances[0]->core_modules_count, 1);
+  ASSERT_EQ(comp_instance->component_instances[0]->core_module_instances_count, 1);
+  ASSERT_EQ(comp_instance->component_instances[2]->core_memories_count, 1);
+  ASSERT_EQ(comp_instance->component_instances[2]->core_tables_count, 1);
 
-//   ASSERT_TRUE(component_2);
+  // Test canonical sections are resolved correctly
+  ASSERT_TRUE(comp_instance->component_instances[0]->functions[1]->canon_options);
+  ASSERT_EQ(comp_instance->component_instances[0]->functions[1]->func_type, comp_instance->component_instances[0]->types[3]->type_specific.function);
+  ASSERT_EQ(comp_instance->component_instances[0]->functions[1]->canon_options->lift_lower_opts->lift_opts->memory, comp_instance->component_instances[0]->core_memories[0]);
+  ASSERT_EQ(comp_instance->component_instances[0]->functions[1]->canon_options->lift_lower_opts->realloc_func, comp_instance->component_instances[0]->core_functions[1]);
 
-//   // Test component is instantiated
-//   WASMComponentInstance *comp_instance_2 = wasm_component_instantiate_internal(component_2, NULL, error_buf, sizeof(error_buf));
-//   ASSERT_TRUE(comp_instance_2);
+  ASSERT_EQ(comp_instance->component_instances[2]->core_functions[3]->canon_options->lift_lower_opts->lift_opts->memory, comp_instance->component_instances[2]->core_memories[0]);
 
-//   // Test all index spaces are populated correctly
-//   ASSERT_EQ(comp_instance->component_instances_count, 5);
-//   ASSERT_EQ(comp_instance->components_count, 2);
-//   ASSERT_EQ(comp_instance->exports_count, 1);
-//   ASSERT_EQ(comp_instance->component_instances[0]->core_functions_count, 3);
-//   ASSERT_EQ(comp_instance->component_instances[0]->functions_count , 2);
-//   ASSERT_EQ(comp_instance->component_instances[0]->types_count, 4);
-//   ASSERT_EQ(comp_instance->component_instances[0]->core_modules_count, 1);
-//   ASSERT_EQ(comp_instance->component_instances[0]->core_module_instances_count, 1);
-//   ASSERT_EQ(comp_instance->component_instances[2]->core_memories_count, 1);
-//   ASSERT_EQ(comp_instance->component_instances[2]->core_tables_count, 1);
+  // Test Alias sections are resolved correctly
+  ASSERT_EQ(comp_instance->component_instances[1], comp_instance->component_instances[0]->exports[0].exp.instance); /*Alias export*/
+  ASSERT_EQ(comp_instance->component_instances[2]->core_functions[1] , comp_instance->component_instances[2]->core_module_instances[0]->export_functions[0].function); /*Alias core export*/
 
-//   // Test canonical sections are resolved correctly
-//   ASSERT_TRUE(comp_instance->component_instances[0]->functions[1]->canon_options);
-//   ASSERT_EQ(comp_instance->component_instances[0]->functions[1]->func_type, comp_instance->component_instances[0]->types[3]->type_specific.function);
-//   ASSERT_EQ(comp_instance->component_instances[0]->functions[1]->canon_options->lift_lower_opts->lift_opts->memory, comp_instance->component_instances[0]->core_memories[0]);
-//   ASSERT_EQ(comp_instance->component_instances[0]->functions[1]->canon_options->lift_lower_opts->realloc_func, comp_instance->component_instances[0]->core_functions[1]);
+  // Test core export tables are instantiated correctly
+  ASSERT_EQ(comp_instance->component_instances[2]->core_module_instances[0]->export_table_count, 1);
 
-//   ASSERT_EQ(comp_instance->component_instances[2]->core_functions[3]->canon_options->lift_lower_opts->lift_opts->memory, comp_instance->component_instances[2]->core_memories[0]);
+  // Test core module instantiation (test imports are resolved properly)
+  ASSERT_EQ(comp_instance->component_instances[2]->core_module_instances[2]->e->functions[0].u.func, comp_instance->component_instances[2]->core_functions[0]->u.func );
+  ASSERT_EQ(comp_instance->component_instances[2]->core_module_instances[2]->e->functions[0].import_func_inst, comp_instance->component_instances[2]->core_functions[0]);
+  ASSERT_EQ(comp_instance->component_instances[2]->core_module_instances[2]->e->functions[0].import_module_inst, comp_instance->component_instances[2]->core_functions[0]->module_instance);
 
-//   // Test Alias sections are resolved correctly
-//   ASSERT_EQ(comp_instance->component_instances[1], comp_instance->component_instances[0]->exports[0].exp.instance); /*Alias export*/
-//   ASSERT_EQ(comp_instance->component_instances[2]->core_functions[1] , comp_instance->component_instances[2]->core_module_instances[0]->export_functions[0].function); /*Alias core export*/
-//   ASSERT_EQ(comp_instance_2->types[2]->type_specific.instance->types[0], comp_instance_2->types[1]); /*Alias outer*/
+  WASMModuleInstance **defined_core_instances = comp_instance->component_instances[2]->defined_core_instances;
+  uint32 defined_core_instances_count = comp_instance->component_instances[2]->defined_core_instances_count;
+  WASMComponentInstance **defined_instances = comp_instance->defined_instances;
+  uint32 defined_instances_count = comp_instance->defined_instances_count;
 
-//   // Test core export tables are instantiated correctly
-//   ASSERT_EQ(comp_instance->component_instances[2]->core_module_instances[0]->export_table_count, 1);
+  // Test deinstantiation
+  wasm_component_deinstantiate(comp_instance);
+  ASSERT_EQ(defined_core_instances_count, 5);
+  for (idx = 0; idx < defined_core_instances_count; idx++) {
+    ASSERT_FALSE(defined_core_instances[idx]);
+  }
+  wasm_runtime_free(component);
 
-//   // Test core module instantiation (test imports are resolved properly)
-//   ASSERT_EQ(comp_instance->component_instances[2]->core_module_instances[2]->e->functions[0].u.func, comp_instance->component_instances[2]->core_functions[0]->u.func );
-//   ASSERT_EQ(comp_instance->component_instances[2]->core_module_instances[2]->e->functions[0].import_func_inst, comp_instance->component_instances[2]->core_functions[0]);
-//   ASSERT_EQ(comp_instance->component_instances[2]->core_module_instances[2]->e->functions[0].import_module_inst, comp_instance->component_instances[2]->core_functions[0]->module_instance);
+}
 
-//   WASMModuleInstance **defined_core_instances = comp_instance->component_instances[2]->defined_core_instances;
-//   uint32 defined_core_instances_count = comp_instance->component_instances[2]->defined_core_instances_count;
-//   WASMComponentInstance **defined_instances = comp_instance->defined_instances;
-//   uint32 defined_instances_count = comp_instance->defined_instances_count;
-
-//   // Test deinstantiation
-//   wasm_component_deinstantiate(comp_instance);
-//   ASSERT_EQ(defined_core_instances_count, 2);
-//   for (idx = 0; idx < defined_core_instances_count; idx++) {
-//     ASSERT_FALSE(defined_core_instances[idx]);
-//   }
-//   ASSERT_EQ(defined_instances_count, 2);
-//   for (idx = 0; idx < defined_instances_count; idx++) {
-//     ASSERT_FALSE(defined_instances[idx]);
-//   }
-//   wasm_runtime_free(component);
-
-// }
-
-//// Blocked for now due to missing wasi imports implementation
-// TEST_F(ComponentInstantiationTest, TestTypesInstantiation)
-// {
-//   bool status;
-//   bh_log_set_verbose_level(WASM_LOG_LEVEL_VERBOSE);
-
-//   const char *path = nullptr;
-//   unsigned char *buf = nullptr;
-
-//   char file_name[] = "complex.wasm";
-//   WASMComponent *component = load_component_from_candidates(file_name);
-//   ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
-
-//   ASSERT_TRUE(component);
-
-//   // Test component is instantiated
-//   WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
-//   ASSERT_TRUE(comp_instance);
-
-//   char file_name_2[] = "processor_and_logging_merged_wac_plug.wasm";
-//   WASMComponent *component_2 = load_component_from_candidates(file_name_2);
-//   ASSERT_NE(component_2, nullptr) << "Failed to load/parse component from candidates.";
-
-//   ASSERT_TRUE(component_2);
-
-//   // Test component is instantiated
-//   WASMComponentInstance *comp_instance_2 = wasm_component_instantiate_internal(component_2, NULL, error_buf, sizeof(error_buf));
-//   ASSERT_TRUE(comp_instance_2);
-
-//   // Test record type instantiation
-//   ASSERT_EQ(comp_instance->types[16]->type, COMPONENT_VAL_TYPE_RECORD);
-//   ASSERT_EQ(comp_instance->types[16]->type_specific.record->count, 2);
-//   ASSERT_EQ(comp_instance->types[16]->type_specific.record->fields[0].type->type_specific.primval, WASM_COMP_PRIMVAL_STRING);
-//   ASSERT_FALSE(strcmp(comp_instance->types[16]->type_specific.record->fields[0].label->name, "name"));
-//   ASSERT_EQ(comp_instance->types[16]->type_specific.record->fields[1].type->type_specific.primval, WASM_COMP_PRIMVAL_U32);
-//   ASSERT_FALSE(strcmp(comp_instance->types[16]->type_specific.record->fields[1].label->name, "age"));
-
-//   // Test variant type instantiation
-//   ASSERT_EQ(comp_instance->types[18]->type, COMPONENT_VAL_TYPE_VARIANT);
-//   ASSERT_EQ(comp_instance->types[18]->type_specific.record->count, 2);
-//   ASSERT_EQ(comp_instance->types[18]->type_specific.record->fields[0].type->type_specific.primval, WASM_COMP_PRIMVAL_F32);
-//   ASSERT_FALSE(strcmp(comp_instance->types[18]->type_specific.record->fields[0].label->name, "circle"));
-//   ASSERT_EQ(comp_instance->types[18]->type_specific.record->fields[1].type->type, COMPONENT_VAL_TYPE_TUPLE);
-//   ASSERT_FALSE(strcmp(comp_instance->types[18]->type_specific.record->fields[1].label->name, "rectangle"));
-
-//   // Test list type instantiation
-//   ASSERT_EQ(comp_instance->types[26]->type, COMPONENT_VAL_TYPE_LIST);
-//   ASSERT_EQ(comp_instance->types[26]->type_specific.list->element_type->type_specific.primval, WASM_COMP_PRIMVAL_S32);
-
-//  // Test tuple type instantiation
-//   ASSERT_EQ(comp_instance->types[17]->type, COMPONENT_VAL_TYPE_TUPLE);
-//   ASSERT_EQ(comp_instance->types[17]->type_specific.tuple->element_types[0]->type_specific.primval, WASM_COMP_PRIMVAL_F32);
-//   ASSERT_EQ(comp_instance->types[17]->type_specific.tuple->element_types[1]->type_specific.primval, WASM_COMP_PRIMVAL_F32);
-
-//   // Test flags type instantiation
-//   ASSERT_EQ(comp_instance_2->types[13]->type_specific.instance->types[31]->type , COMPONENT_VAL_TYPE_FLAGS);
-//   ASSERT_EQ(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->count, 6);
-//   ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[0].name, "read"));
-//   ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[1].name, "write"));
-//   ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[2].name, "file-integrity-sync"));
-//   ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[3].name, "data-integrity-sync"));
-//   ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[4].name, "requested-write-sync"));
-//   ASSERT_FALSE(strcmp(comp_instance_2->types[13]->type_specific.instance->types[31]->type_specific.flag->flags[5].name, "mutate-directory"));
-
-//   // Test enum type instantiation
-//   ASSERT_EQ(comp_instance_2->component_instances[13]->types[24]->type, COMPONENT_VAL_TYPE_ENUM);
-//   ASSERT_EQ(comp_instance_2->component_instances[13]->types[24]->type_specific.enum_type->count, 3);
-//   ASSERT_FALSE(strcmp(comp_instance_2->component_instances[13]->types[24]->type_specific.enum_type->labels[0].name, "info"));
-//   ASSERT_FALSE(strcmp(comp_instance_2->component_instances[13]->types[24]->type_specific.enum_type->labels[1].name, "warning"));
-//   ASSERT_FALSE(strcmp(comp_instance_2->component_instances[13]->types[24]->type_specific.enum_type->labels[2].name, "error"));
-
-//   // Test option type instantiation
-//   ASSERT_EQ(comp_instance->types[34]->type, COMPONENT_VAL_TYPE_OPTION);
-//   ASSERT_EQ(comp_instance->types[34]->type_specific.option->element_type->type_specific.primval, WASM_COMP_PRIMVAL_STRING);
-
-//   // Test result type instantiation
-//   ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[8]->type, COMPONENT_VAL_TYPE_RESULT);
-//   ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[8]->type_specific.result->error_type->type, COMPONENT_VAL_TYPE_VARIANT);
-//   ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[8]->type_specific.result->error_type->type_specific.variant->count, 2);
-//   ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[8]->type_specific.result->result_type->type_specific.primval, WASM_COMP_PRIMVAL_U64);
-
-//   // Test own type instantiation
-//   ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[4]->type, COMPONENT_VAL_TYPE_OWN);
-//   ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[4]->type_specific.resource_handle->is_borrow, false);
-//   ASSERT_FALSE(strcmp(comp_instance->types[2]->type_specific.instance->types[4]->type_specific.resource_handle->resource->name, "error"));
-
-//   // Test borrow type instantiation
-//   ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[7]->type, COMPONENT_VAL_TYPE_BORROW);
-//   ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[7]->type_specific.resource_handle->is_borrow, true);
-//   ASSERT_FALSE(strcmp(comp_instance->types[2]->type_specific.instance->types[7]->type_specific.resource_handle->resource->name, "output-stream"));
-
-//   // Test resource type instantiation
-//   ASSERT_EQ(comp_instance->types[2]->type_specific.instance->types[2]->type, COMPONENT_VAL_TYPE_RESOURCE_SYNC);
-//   ASSERT_FALSE(strcmp(comp_instance->types[2]->type_specific.instance->types[2]->type_specific.resource->name , "output-stream"));
-//   ASSERT_FALSE(strcmp(comp_instance->types[2]->type_specific.instance->types[2]->type_specific.resource->interface_name, "wasi:io/streams@0.2.3"));
-//   ASSERT_TRUE(comp_instance->types[2]->type_specific.instance->types[2]->type_specific.resource->drop_method);
-
-
-// }
 
 TEST_F(ComponentInstantiationTest, TestInstantiateSmokeTest)
 {
@@ -963,59 +848,58 @@ TEST_F(ComponentInstantiationTest, TestInstantiateSmokeTest)
   }
 }
 
-//// Blocked for now due to missing wasi imports implementation
-// TEST_F(ComponentInstantiationTest, TestInstantiateCanonFunctions)
-// {
-//   char file_name[] = "surface_and_geometry_0_4_0.wasm";
-//   WASMComponent *component = load_component_from_candidates(file_name);
-//   ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
+TEST_F(ComponentInstantiationTest, TestInstantiateCanonFunctions)
+{
+  char file_name[] = "surface_and_geometry_0_4_0.wasm";
+  WASMComponent *component = load_component_from_candidates(file_name);
+  ASSERT_NE(component, nullptr) << "Failed to load/parse component from candidates.";
 
-//   ASSERT_TRUE(component);
-//   bh_log_set_verbose_level(WASM_LOG_LEVEL_DEBUG);
+  ASSERT_TRUE(component);
+  bh_log_set_verbose_level(WASM_LOG_LEVEL_DEBUG);
 
-//   // Test component is instantiated
-//   WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
-//   ASSERT_TRUE(comp_instance);
+  // Test component is instantiated
+  WASMComponentInstance *comp_instance = wasm_component_instantiate_internal(component, NULL, error_buf, sizeof(error_buf));
+  ASSERT_TRUE(comp_instance);
 
-//   //Canon function from component 0 core module 0
+  //Canon function from component 0 core module 0
 
-//   ASSERT_TRUE(comp_instance->component_instances[5]->core_functions[1] );
-//   ASSERT_TRUE(comp_instance->component_instances[5]->core_functions[1]->is_canon_func );
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_functions[1]->canon_type, WASM_COMP_CANON_RESOURCE_DROP);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_functions[1]->resource, comp_instance->component_instances[5]->types[8]->type_specific.resource);
+  ASSERT_TRUE(comp_instance->component_instances[5]->core_functions[1] );
+  ASSERT_TRUE(comp_instance->component_instances[5]->core_functions[1]->is_canon_func );
+  ASSERT_EQ(comp_instance->component_instances[5]->core_functions[1]->canon_type, WASM_COMP_CANON_RESOURCE_DROP);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_functions[1]->resource, comp_instance->component_instances[5]->types[8]->type_specific.resource);
 
-//   ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[0].is_canon_func);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[0].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[0].resource, comp_instance->component_instances[5]->types[8]->type_specific.resource);
+  ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[0].is_canon_func);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[0].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[0].resource, comp_instance->component_instances[5]->types[8]->type_specific.resource);
 
-//   ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[1].is_canon_func);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[1].canon_type, WASM_COMP_CANON_RESOURCE_NEW);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[1].resource, comp_instance->component_instances[5]->types[8]->type_specific.resource);
+  ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[1].is_canon_func);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[1].canon_type, WASM_COMP_CANON_RESOURCE_NEW);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[1].resource, comp_instance->component_instances[5]->types[8]->type_specific.resource);
 
-//   ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[2].is_canon_func);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[2].canon_type, WASM_COMP_CANON_RESOURCE_REP);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[2].resource, comp_instance->component_instances[5]->types[8]->type_specific.resource);
+  ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[2].is_canon_func);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[2].canon_type, WASM_COMP_CANON_RESOURCE_REP);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[2].resource, comp_instance->component_instances[5]->types[8]->type_specific.resource);
 
-//   ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[3].is_canon_func);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[3].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[3].resource, comp_instance->component_instances[5]->types[1]->type_specific.resource);
+  ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[3].is_canon_func);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[3].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[3].resource, comp_instance->component_instances[5]->types[1]->type_specific.resource);
 
-//   ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[4].is_canon_func);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[4].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
-//   ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[4].resource, comp_instance->component_instances[5]->types[5]->type_specific.resource);
+  ASSERT_TRUE(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[4].is_canon_func);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[4].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
+  ASSERT_EQ(comp_instance->component_instances[5]->core_module_instances[7]->e->functions[4].resource, comp_instance->component_instances[5]->types[5]->type_specific.resource);
 
-//   //Canon function from component 1 core module 0
+  //Canon function from component 1 core module 0
 
-//   ASSERT_TRUE(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[3].is_canon_func);
-//   ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[3].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
-//   ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[3].resource, comp_instance->component_instances[7]->types[9]->type_specific.resource);
+  ASSERT_TRUE(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[3].is_canon_func);
+  ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[3].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
+  ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[3].resource, comp_instance->component_instances[7]->types[9]->type_specific.resource);
 
-//   ASSERT_TRUE(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[7].is_canon_func);
-//   ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[7].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
-//   ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[7].resource, comp_instance->component_instances[7]->types[10]->type_specific.resource);
+  ASSERT_TRUE(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[7].is_canon_func);
+  ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[7].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
+  ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[7].resource, comp_instance->component_instances[7]->types[10]->type_specific.resource);
 
-//   ASSERT_TRUE(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[8].is_canon_func);
-//   ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[8].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
-//   ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[8].resource, comp_instance->component_instances[7]->types[11]->type_specific.resource);
+  ASSERT_TRUE(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[8].is_canon_func);
+  ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[8].canon_type, WASM_COMP_CANON_RESOURCE_DROP);
+  ASSERT_EQ(comp_instance->component_instances[7]->core_module_instances[7]->e->functions[8].resource, comp_instance->component_instances[7]->types[11]->type_specific.resource);
 
-// }
+}
