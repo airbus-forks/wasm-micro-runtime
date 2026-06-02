@@ -11,6 +11,7 @@
 #include "wasm_runtime_common.h"
 #include "wasm_component.h"
 #include "wasm_runtime.h"
+#include "wasm_component_resource_table.h"
 #include "mem_alloc.h"
 #include "wasm_export.h"
 
@@ -36,6 +37,8 @@ typedef struct WASMMemoryInstance WASMMemoryInstance;
 typedef struct WASMTableInstance WASMTableInstance;
 typedef struct WASMGlobalInstance WASMGlobalInstance;
 typedef struct WASMModuleInstance WASMModuleInstance;
+typedef struct CanonicalOptions CanonicalOptions;
+typedef struct LiftLowerContext LiftLowerContext;
 
 typedef enum CoreExportType {
     CORE_IMPORT_KIND_FUNC = 0,
@@ -219,6 +222,7 @@ typedef struct WASMComponentCanonOptsInstance {
 typedef struct WASMComponentFunctionInstance {
     WASMComponentFuncTypeInstance *func_type;
     WASMFunctionInstance *core_func;
+    CanonicalOptions *canon_options;
 } WASMComponentFunctionInstance;
 
 // Used for storing the sizes of the defined types/ exports/ index spaces of the
@@ -372,6 +376,8 @@ typedef struct WASMComponentInstance {
     uint32 default_wasm_stack_size;  // Stack configuration
     void *custom_data;
     WASMComponent *component; // Reference to component definition
+
+    WASMComponentResourceTable *table;
 
     // Index spaces:
 
@@ -543,6 +549,34 @@ wasm_resolve_canon(WASMComponentCanonSection *canon_section,
                    WASMComponentInstance *comp_instance, char *error_buf,
                    uint32 error_buf_size);
 
+bool
+wasm_component_application_execute_main(WASMComponentInstance *, int32 argc,
+                                        char *argv[]);
+bool
+wasm_component_application_execute_func(WASMComponentInstance *,
+                                        const char *name, int32 argc,
+                                        char *argv[]);
+bool
+wasm_component_application_execute_func_ex(WASMComponentInstance *,
+                                           const char *name, int32 argc,
+                                           char *argv[], uint32 *argc1,
+                                           uint32 **argv1);
+
+uint32_t
+align_to(uint32_t ptr, uint32_t alignment);
+uint32_t
+compute_discriminant_alignment(uint32_t num_cases);
+uint32_t
+compute_alignment_primitive_value(WASMComponentPrimValType primval);
+uint32_t
+compute_alignment(WASMComponentTypeInstance *type);
+uint32_t
+compute_elem_size_primitive_value(WASMComponentPrimValType primval);
+uint32_t
+compute_elem_size(WASMComponentTypeInstance *type);
+uint32_t
+compute_max_case_alignment(WASMComponentVariantInstance *type);
+
 WASMComponentFunctionInstance *
 wasm_component_lookup_function(const WASMComponentInstance *component_inst,
                                const char *name);
@@ -562,6 +596,10 @@ wasm_component_deinstantiate(WASMComponentInstance *comp_instance);
 
 WASMComponentFuncTypeInstance *
 wasm_get_component_func_type(WASMExecEnv *exec_env);
+
+uint32_t
+wasm_runtime_call_realloc(LiftLowerContext *cx, int32_t old_ptr,
+                          int32_t old_size, int32_t align, int32_t new_size);
 
 #ifdef __cplusplus
 }

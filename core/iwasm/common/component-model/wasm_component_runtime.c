@@ -11,7 +11,430 @@
 #include "wasm_component_runtime.h"
 #include "bh_log.h"
 #include "stdio.h"
+#include "wasm_component_canonical.h"
+#include "wasm_component_task.h"
 #include "bh_assert.h"
+
+/// @brief Compute discriminant alignment based on number of cases
+uint32_t
+compute_discriminant_alignment(uint32_t num_cases)
+{
+    if (num_cases <= 256)
+        return 1; // u8
+    else if (num_cases <= 65536)
+        return 2; // u16
+    else
+        return 4; // u32
+}
+
+uint32_t
+compute_max_case_alignment(WASMComponentVariantInstance *type)
+{
+    uint32_t max_case_align = 1;
+    for (uint32_t i = 0; i < type->count; i++) {
+        if (type->cases[i].value_type) {
+            uint32_t case_align = compute_alignment(type->cases[i].value_type);
+            if (case_align > max_case_align) {
+                max_case_align = case_align;
+            }
+        }
+    }
+
+    return max_case_align;
+}
+
+/// @brief Compute alignment for primitive values
+uint32_t
+compute_alignment_primitive_value(WASMComponentPrimValType primval)
+{
+    switch (primval) {
+        case WASM_COMP_PRIMVAL_BOOL:
+        case WASM_COMP_PRIMVAL_S8:
+        case WASM_COMP_PRIMVAL_U8:
+            return 1;
+        case WASM_COMP_PRIMVAL_S16:
+        case WASM_COMP_PRIMVAL_U16:
+            return 2;
+        case WASM_COMP_PRIMVAL_S32:
+        case WASM_COMP_PRIMVAL_U32:
+        case WASM_COMP_PRIMVAL_F32:
+        case WASM_COMP_PRIMVAL_CHAR:
+        case WASM_COMP_PRIMVAL_STRING:
+        case WASM_COMP_PRIMVAL_ERROR_CONTEXT:
+            return 4;
+        case WASM_COMP_PRIMVAL_S64:
+        case WASM_COMP_PRIMVAL_U64:
+        case WASM_COMP_PRIMVAL_F64:
+            return 8;
+        default:
+            return 1;
+    }
+}
+
+/// @brief Calculate alignment size type
+/// @param type
+/// @return uint32_t alignment computed
+uint32_t
+compute_alignment(WASMComponentTypeInstance *type)
+{
+    switch (type->type) {
+        case COMPONENT_VAL_TYPE_PRIMVAL:
+            // Look at which primval it is
+            return compute_alignment_primitive_value(
+                type->type_specific.primval);
+
+        case COMPONENT_VAL_TYPE_LIST:
+        {
+            return 4;
+        }
+
+        case COMPONENT_VAL_TYPE_FIXED_SIZE_LIST:
+        {
+            WASMComponentListLenInstance *list_len =
+                type->type_specific.list_len;
+            return compute_alignment(list_len->element_type);
+        }
+
+        case COMPONENT_VAL_TYPE_RECORD:
+        {
+            // For records, alignment = max alignment of all fields
+            uint32_t max_align = 1;
+            WASMComponentTypeInstance *val_type = NULL;
+            for (uint32_t index = 0; index < type->type_specific.record->count;
+                 index++) {
+                val_type = type->type_specific.record->fields[index].type;
+                uint32_t field_align = compute_alignment(val_type);
+                if (field_align > max_align) {
+                    max_align = field_align;
+                }
+            }
+
+            return max_align;
+        }
+
+        case COMPONENT_VAL_TYPE_TUPLE:
+        {
+            // For tuples, alignment = max alignment of all elements
+            uint32_t max_align = 1;
+            WASMComponentTupleInstance *tuple = type->type_specific.tuple;
+            for (uint32_t i = 0; i < tuple->count; i++) {
+                uint32_t elem_align =
+                    compute_alignment(tuple->element_types[i]);
+                if (elem_align > max_align) {
+                    max_align = elem_align;
+                }
+            }
+            return max_align;
+        }
+
+        case COMPONENT_VAL_TYPE_FLAGS:
+        {
+            uint32_t n = type->type_specific.flag->count;
+
+            bh_assert((0 < n) && (n <= 32));
+
+            if (n <= 8)
+                return 1;
+            if (n <= 16)
+                return 2;
+
+            return 4;
+        }
+
+        case COMPONENT_VAL_TYPE_VARIANT:
+        {
+            uint32_t n = type->type_specific.variant->count;
+
+            // Compute discriminant alignment
+            uint32_t disc_align = compute_discriminant_alignment(n);
+
+            // Compute max case alignment
+            uint32_t max_case_align =
+                compute_max_case_alignment(type->type_specific.variant);
+
+            return (disc_align > max_case_align) ? disc_align : max_case_align;
+        }
+
+        case COMPONENT_VAL_TYPE_OPTION:
+        {
+            // Option = variant with 2 cases: none (empty), some (element_type)
+            WASMComponentOptionInstance *option = type->type_specific.option;
+
+            // Discriminant for 2 cases = u8 = alignment 1
+            uint32_t disc_align = 1;
+
+            // Max case alignment = max(none, some)
+            // none is empty (align 1), some has element_type
+            uint32_t some_align = compute_alignment(option->element_type);
+
+            return (disc_align > some_align) ? disc_align : some_align;
+        }
+
+        case COMPONENT_VAL_TYPE_RESULT:
+        {
+            // Result = variant with 2 cases: ok (result_type), error
+            // (error_type)
+            WASMComponentResultInstance *result = type->type_specific.result;
+
+            // Discriminant for 2 cases = u8 = alignment 1
+            uint32_t disc_align = 1;
+
+            // Max case alignment = max(ok, error)
+            uint32_t ok_align = 1;
+            uint32_t err_align = 1;
+
+            if (result->result_type) {
+                ok_align = compute_alignment(result->result_type);
+            }
+            if (result->error_type) {
+                err_align = compute_alignment(result->error_type);
+            }
+
+            uint32_t max_case_align =
+                (ok_align > err_align) ? ok_align : err_align;
+
+            return (disc_align > max_case_align) ? disc_align : max_case_align;
+        }
+
+        case COMPONENT_VAL_TYPE_ENUM:
+        {
+            // Enum = variant where all cases are empty
+            // So alignment = discriminant alignment only
+            WASMComponentEnumType *enum_type = type->type_specific.enum_type;
+            return compute_discriminant_alignment(enum_type->count);
+        }
+
+        case COMPONENT_VAL_TYPE_OWN:
+        case COMPONENT_VAL_TYPE_BORROW:
+        case COMPONENT_VAL_TYPE_STREAM:
+        case COMPONENT_VAL_TYPE_FUTURE:
+        {
+            return 4; // All are i32 handles
+        }
+
+        default:
+            return 0;
+    }
+}
+
+/// @brief Compute elem size for primitive values
+uint32_t
+compute_elem_size_primitive_value(WASMComponentPrimValType primval)
+{
+    switch (primval) {
+        case WASM_COMP_PRIMVAL_BOOL:
+        case WASM_COMP_PRIMVAL_S8:
+        case WASM_COMP_PRIMVAL_U8:
+            return 1;
+        case WASM_COMP_PRIMVAL_S16:
+        case WASM_COMP_PRIMVAL_U16:
+            return 2;
+        case WASM_COMP_PRIMVAL_S32:
+        case WASM_COMP_PRIMVAL_U32:
+        case WASM_COMP_PRIMVAL_F32:
+        case WASM_COMP_PRIMVAL_CHAR:
+        case WASM_COMP_PRIMVAL_ERROR_CONTEXT:
+            return 4;
+        case WASM_COMP_PRIMVAL_S64:
+        case WASM_COMP_PRIMVAL_U64:
+        case WASM_COMP_PRIMVAL_F64:
+        case WASM_COMP_PRIMVAL_STRING:
+            return 8;
+        default:
+            return 1;
+    }
+}
+
+/// @brief Calculate element size
+/// @param type
+/// @return uint32_t elem size computed
+uint32_t
+compute_elem_size(WASMComponentTypeInstance *type)
+{
+    switch (type->type) {
+        case COMPONENT_VAL_TYPE_PRIMVAL:
+            // Look at which primval it is
+            return compute_elem_size_primitive_value(
+                type->type_specific.primval);
+
+        case COMPONENT_VAL_TYPE_LIST:
+        {
+            return 8;
+        }
+
+        case COMPONENT_VAL_TYPE_FIXED_SIZE_LIST:
+        {
+            WASMComponentListLenInstance *list_len =
+                type->type_specific.list_len;
+            return list_len->len * compute_elem_size(list_len->element_type);
+        }
+
+        case COMPONENT_VAL_TYPE_RECORD:
+        {
+            // For records, alignment = max alignment of all fields
+            uint32_t s = 0;
+            WASMComponentTypeInstance *val_type = NULL;
+            for (uint32_t index = 0; index < type->type_specific.record->count;
+                 index++) {
+                val_type = type->type_specific.record->fields[index].type;
+                s = align_to(s, compute_alignment(val_type));
+                s += compute_elem_size(val_type);
+            }
+
+            assert(s > 0);
+            return align_to(s, type->alignment);
+        }
+
+        case COMPONENT_VAL_TYPE_TUPLE:
+        {
+            // Tuple despecializes to record, same elem_size algorithm
+            uint32_t s = 0;
+            WASMComponentTupleInstance *tuple = type->type_specific.tuple;
+
+            for (uint32_t i = 0; i < tuple->count; i++) {
+                WASMComponentTypeInstance *elem = tuple->element_types[i];
+                s = align_to(
+                    s, compute_alignment(elem)); // Align to element's alignment
+                s += compute_elem_size(elem);    // Add element's size
+            }
+
+            bh_assert(s > 0); // Tuples can't be empty
+            return align_to(
+                s,
+                type->alignment); // Final padding to tuple's overall alignment
+        }
+
+        case COMPONENT_VAL_TYPE_FLAGS:
+        {
+            uint32_t n = type->type_specific.flag->count;
+
+            bh_assert((0 < n) && (n <= 32));
+
+            if (n <= 8)
+                return 1;
+            if (n <= 16)
+                return 2;
+
+            return 4;
+        }
+
+        case COMPONENT_VAL_TYPE_VARIANT:
+        {
+            WASMComponentVariantInstance *variant = type->type_specific.variant;
+
+            // 1. Discriminant size (depends on number of cases)
+            uint32_t s = compute_discriminant_alignment(
+                variant->count); // Returns size (1, 2, or 4)
+
+            // 2. Find max case alignment and max case size
+            uint32_t max_case_align = 1;
+            uint32_t max_case_size = 0;
+
+            for (uint32_t i = 0; i < variant->count; i++) {
+                if (variant->cases[i].value_type) {
+                    uint32_t case_align =
+                        compute_alignment(variant->cases[i].value_type);
+                    uint32_t case_size =
+                        compute_elem_size(variant->cases[i].value_type);
+
+                    if (case_align > max_case_align) {
+                        max_case_align = case_align;
+                    }
+                    if (case_size > max_case_size) {
+                        max_case_size = case_size;
+                    }
+                }
+            }
+
+            // 3. Align discriminant to max case alignment
+            s = align_to(s, max_case_align);
+
+            // 4. Add max case size (largest payload among all cases)
+            s += max_case_size;
+
+            // 5. Align to variant's overall alignment
+            return align_to(s, type->alignment);
+        }
+
+        case COMPONENT_VAL_TYPE_OPTION:
+        {
+            // Option = variant with 2 cases: none (empty), some (element_type)
+            WASMComponentOptionInstance *option = type->type_specific.option;
+
+            // 1. Discriminant size (2 cases = u8 = 1 byte)
+            uint32_t s = 1;
+
+            // 2. Max case alignment: max(none=1, some=element_align)
+            uint32_t some_align = compute_alignment(option->element_type);
+            uint32_t max_case_align = (some_align > 1) ? some_align : 1;
+
+            // 3. Align discriminant to max case alignment
+            s = align_to(s, max_case_align);
+
+            // 4. Add max case size (only "some" has payload)
+            uint32_t some_size = compute_elem_size(option->element_type);
+            s += some_size;
+
+            // 5. Align to variant's overall alignment
+            return align_to(s, type->alignment);
+        }
+
+        case COMPONENT_VAL_TYPE_RESULT:
+        {
+            // Result = variant with 2 cases: ok (result_type), error
+            // (error_type)
+            WASMComponentResultInstance *result = type->type_specific.result;
+
+            // 1. Discriminant size (2 cases = u8 = 1 byte)
+            uint32_t s = 1;
+
+            // 2. Max case alignment: max(ok_align, error_align)
+            uint32_t ok_align = 1, err_align = 1;
+            uint32_t ok_size = 0, err_size = 0;
+
+            if (result->result_type) {
+                ok_align = compute_alignment(result->result_type);
+                ok_size = compute_elem_size(result->result_type);
+            }
+            if (result->error_type) {
+                err_align = compute_alignment(result->error_type);
+                err_size = compute_elem_size(result->error_type);
+            }
+
+            uint32_t max_case_align =
+                (ok_align > err_align) ? ok_align : err_align;
+            uint32_t max_case_size = (ok_size > err_size) ? ok_size : err_size;
+
+            // 3. Align discriminant to max case alignment
+            s = align_to(s, max_case_align);
+
+            // 4. Add max case size
+            s += max_case_size;
+
+            // 5. Align to variant's overall alignment
+            return align_to(s, type->alignment);
+        }
+
+        case COMPONENT_VAL_TYPE_ENUM:
+        {
+            // Enum = variant with all cases empty
+            // elem_size = discriminant size only (no payloads)
+            WASMComponentEnumType *enum_type = type->type_specific.enum_type;
+            return compute_discriminant_alignment(enum_type->count);
+        }
+
+        case COMPONENT_VAL_TYPE_OWN:
+        case COMPONENT_VAL_TYPE_BORROW:
+        case COMPONENT_VAL_TYPE_STREAM:
+        case COMPONENT_VAL_TYPE_FUTURE:
+        {
+            return 4; // All are i32 handles
+        }
+
+        default:
+            return 0;
+    }
+}
 
 /// @brief Calculate size needed for the default value types defined in this
 /// component
@@ -677,6 +1100,17 @@ wasm_component_instance_allocate(WASMComponentIndexCount *index_count,
     +----------------------------------+
 
 */
+
+    // Start with initial size of 10, grow by 50% when needed
+    comp_instance->table = wasm_component_table_init(10, 50);
+    if (!comp_instance->table) {
+        wasm_runtime_free(comp_instance);
+        set_error_buf_ex(
+            error_buf, error_buf_size,
+            "ERROR: Failed to initialize component instance table\n");
+        return NULL;
+    }
+
     LOG_DEBUG(
         "Component instance memory allocation successfull, total size is %d\n",
         total_size);
@@ -969,6 +1403,32 @@ wasm_component_deinstantiate(WASMComponentInstance *comp_instance)
         }
     }
 
+    // Free runtime canonical options for component functions (canon.lift)
+    for (idx = 0; idx < comp_instance->defined_functions_count; idx++) {
+        WASMComponentFunctionInstance *func =
+            &comp_instance->defined_functions[idx];
+        if (func && func->canon_options) {
+            free_canonical_options(func->canon_options);
+            func->canon_options = NULL;
+        }
+    }
+
+    // Free runtime canonical options for core functions (canon.lower)
+    for (idx = 0; idx < comp_instance->defined_core_functions_count; idx++) {
+        WASMFunctionInstance *func =
+            &comp_instance->defined_core_functions[idx];
+        if (func && func->canon_options) {
+            free_canonical_options(func->canon_options);
+            func->canon_options = NULL;
+        }
+    }
+
+    // Destroy the component instance table
+    if (comp_instance->table) {
+        wasm_component_table_destroy(comp_instance->table);
+        comp_instance->table = NULL;
+    }
+
     wasm_runtime_free(comp_instance);
     comp_instance = NULL;
 }
@@ -1033,6 +1493,71 @@ wasm_component_lookup_function(const WASMComponentInstance *component_inst,
     }
 
     return NULL; // Function not found
+}
+
+WASMMemoryInstance *
+canon_get_memory(CanonicalOptions *canon_opts)
+{
+    if (!canon_opts || !canon_opts->lift_lower_opts
+        || !canon_opts->lift_lower_opts->lift_opts) {
+        return NULL;
+    }
+    else {
+        return canon_opts->lift_lower_opts->lift_opts->memory;
+    }
+}
+
+uint32_t
+wasm_runtime_call_realloc(LiftLowerContext *cx, int32_t old_ptr,
+                          int32_t old_size, int32_t align, int32_t new_size)
+{
+    WASMFunctionInstance *realloc_func = get_realloc_func(cx);
+    if (!realloc_func) {
+        set_component_exception(cx, "realloc function not provided");
+        return 0;
+    }
+
+    WASMExecEnv *exec_env = wasm_runtime_get_exec_env_singleton(
+        (WASMModuleInstanceCommon *)realloc_func->module_instance);
+    if (!exec_env) {
+        set_component_exception(cx, "create singleton exec_env failed");
+        return 0;
+    }
+
+    // The singleton exec_env may be changed by a nested import call, thus we
+    // need to save and restore it
+    WASMModuleInstanceCommon *saved_module_inst =
+        wasm_runtime_get_module_inst(exec_env);
+    wasm_exec_env_set_module_inst(
+        exec_env, (WASMModuleInstanceCommon *)realloc_func->module_instance);
+
+    wasm_val_t args[4] = { { .kind = WASM_I32, .of.i32 = old_ptr },
+                           { .kind = WASM_I32, .of.i32 = old_size },
+                           { .kind = WASM_I32, .of.i32 = align },
+                           { .kind = WASM_I32, .of.i32 = new_size } };
+    wasm_val_t results[1];
+
+#ifdef OS_ENABLE_HW_BOUND_CHECK
+    WASMExecEnv *saved_tls = wasm_runtime_get_exec_env_tls();
+    wasm_runtime_set_exec_env_tls(NULL);
+#endif
+    if (!wasm_runtime_call_wasm_a(exec_env,
+                                  (WASMFunctionInstanceCommon *)realloc_func, 1,
+                                  results, 4, args)) {
+        const char *ex = wasm_runtime_get_exception(
+            (WASMModuleInstanceCommon *)realloc_func->module_instance);
+#ifdef OS_ENABLE_HW_BOUND_CHECK
+        wasm_runtime_set_exec_env_tls(saved_tls);
+#endif
+        wasm_exec_env_restore_module_inst(exec_env, saved_module_inst);
+        set_component_exception(cx, ex ? ex : "realloc call failed");
+        return 0;
+    }
+#ifdef OS_ENABLE_HW_BOUND_CHECK
+    wasm_runtime_set_exec_env_tls(saved_tls);
+#endif
+    wasm_exec_env_restore_module_inst(exec_env, saved_module_inst);
+    return results[0].of.i32;
 }
 
 WASMComponentFuncTypeInstance *

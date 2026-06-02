@@ -2598,16 +2598,19 @@ fill_resource_type_instance(WASMComponentTypeInstance **types,
     memset(new_method, 0, sizeof(WASMFunctionInstance));
     memset(rep_method, 0, sizeof(WASMFunctionInstance));
 
+    drop_method->resource = resource;
     drop_method->canon_type = WASM_COMP_CANON_RESOURCE_DROP;
     drop_method->is_canon_func = true;
     drop_method->param_cell_num = 1;
     drop_method->ret_cell_num = 0;
 
+    new_method->resource = resource;
     new_method->canon_type = WASM_COMP_CANON_RESOURCE_NEW;
     new_method->is_canon_func = true;
     new_method->param_cell_num = 1;
     new_method->ret_cell_num = 1;
 
+    rep_method->resource = resource;
     rep_method->canon_type = WASM_COMP_CANON_RESOURCE_REP;
     rep_method->is_canon_func = true;
     rep_method->param_cell_num = 1;
@@ -2951,7 +2954,10 @@ fill_def_type_instance(WASMComponentTypeInstance **types,
             // TODO
             return 0;
     }
-
+    curr_type->alignment = compute_alignment(curr_type);
+    curr_type->elem_size = compute_elem_size(curr_type);
+    LOG_DEBUG("Alignment: %d | Elem_size: %d\n", curr_type->alignment,
+              curr_type->elem_size);
     types[types_count] = curr_type;
     (*curr_types_count)++;
 

@@ -13,6 +13,7 @@ cd ../../../../
 # Define the target folders
 TARGET_DIRS="core/iwasm/interpreter \
              core/iwasm/common/component-model \
+             tests/unit/canonical* \
              tests/unit/component*"
              
 # Define the log report file

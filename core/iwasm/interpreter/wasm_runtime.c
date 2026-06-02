@@ -3333,7 +3333,7 @@ wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
             &module_inst->e->functions[module->retain_function];
     }
 
-#if WASM_ENABLE_LIBC_WASI != 0
+#if WASM_ENABLE_LIBC_WASI != 0 && WASM_ENABLE_COMPONENT_MODEL == 0
     /* The sub-instance will get the wasi_ctx from main-instance */
     if (!is_sub_inst) {
         const WASIArguments *wasi_args = &args->wasi;
@@ -3550,10 +3550,11 @@ wasm_deinstantiate(WASMModuleInstance *module_inst, bool is_sub_inst)
 
     if (module_inst->c_api_func_imports)
         wasm_runtime_free(module_inst->c_api_func_imports);
-
+#if WASM_ENABLE_COMPONENT_MODEL == 0
     if (!is_sub_inst) {
         wasm_native_call_context_dtors((WASMModuleInstanceCommon *)module_inst);
     }
+#endif
 
 #if WASM_ENABLE_BULK_MEMORY != 0
     bh_bitmap_delete(module_inst->e->common.data_dropped);

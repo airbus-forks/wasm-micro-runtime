@@ -33,6 +33,7 @@ typedef struct WASMTagInstance WASMTagInstance;
 typedef struct WASMComponentInstance WASMComponentInstance;
 typedef struct WASMComponentCanonOptsInstance WASMComponentCanonOptsInstance;
 typedef struct WASMComponentFunctionInstance WASMComponentFunctionInstance;
+typedef struct CanonicalOptions CanonicalOptions;
 typedef struct WASMComponentResourceInstance WASMComponentResourceInstance;
 
 #include "../common/component-model/wasm_component.h"
@@ -263,6 +264,7 @@ struct WASMFunctionInstance {
     WASMModuleInstance *module_instance;
     WASMComponentFunctionInstance *component_function;
     uint32 func_idx;
+    CanonicalOptions *canon_options;
     bool is_canon_func;
     WASMComponentCanonType canon_type;
     WASMComponentResourceInstance *resource;

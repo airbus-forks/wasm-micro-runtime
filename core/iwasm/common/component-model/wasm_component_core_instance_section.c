@@ -11,6 +11,9 @@
 #include "wasm_loader_common.h"
 #include "wasm_runtime_common.h"
 #include "wasm_export.h"
+#include "wasm_component_canonical.h"
+#include "wasm_memory.h"
+#include "mem_alloc.h"
 #include <stdio.h>
 
 // Section 2: core:instance ::= ie:<core:instanceexpr> => (instance ie)
@@ -699,8 +702,14 @@ wasm_resolve_core_instance(WASMComponentCoreInstSection *instance_section,
                     found_imports.func_instance[import_idx]->is_canon_func;
                 core_instance->e->functions[import_idx].canon_type =
                     found_imports.func_instance[import_idx]->canon_type;
+                core_instance->e->functions[import_idx].resource =
+                    found_imports.func_instance[import_idx]->resource;
+                core_instance->e->functions[import_idx].canon_options =
+                    found_imports.func_instance[import_idx]->canon_options;
                 core_instance->e->functions[import_idx].component_function =
                     found_imports.func_instance[import_idx]->component_function;
+                core_instance->e->functions[import_idx].canon_options =
+                    found_imports.func_instance[import_idx]->canon_options;
             }
             for (import_idx = 0; import_idx < found_imports.tables_count;
                  import_idx++) {
@@ -731,6 +740,21 @@ wasm_resolve_core_instance(WASMComponentCoreInstSection *instance_section,
                  import_idx++) {
                 if (import_idx > core_instance->memory_count) {
                     goto fail_imports;
+                }
+                /* Free resources of the memory allocated by wasm_instantiate
+                   before replacing with the imported memory */
+                WASMMemoryInstance *orig_mem =
+                    core_instance->memories[import_idx];
+                if (orig_mem) {
+                    if (orig_mem->heap_handle) {
+                        mem_allocator_destroy(orig_mem->heap_handle);
+                        wasm_runtime_free(orig_mem->heap_handle);
+                        orig_mem->heap_handle = NULL;
+                    }
+                    if (orig_mem->memory_data) {
+                        wasm_deallocate_linear_memory(orig_mem);
+                        orig_mem->memory_data = NULL;
+                    }
                 }
                 core_instance->memories[import_idx] =
                     found_imports.mem_instance[import_idx];

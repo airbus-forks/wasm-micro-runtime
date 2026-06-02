@@ -5,6 +5,8 @@
 
 #include "wasm_component.h"
 #include "wasm_component_runtime.h"
+#include "wasm_component_canonical.h"
+#include "wasm_component_flat.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -1337,6 +1339,9 @@ wasm_resolve_canon(WASMComponentCanonSection *canon_section,
 
                 // Clear fields that shouldn't be copied from the source - It
                 // may contain garbage
+                comp_instance
+                    ->defined_functions[comp_instance->defined_functions_count]
+                    .canon_options = NULL;
                 comp_instance->functions[comp_instance->functions_count] =
                     &comp_instance->defined_functions
                          [comp_instance->defined_functions_count];
@@ -1351,6 +1356,20 @@ wasm_resolve_canon(WASMComponentCanonSection *canon_section,
                 else {
                     canon_opts_instance = &empty_canon_opts;
                 }
+                comp_instance->functions[comp_instance->functions_count]
+                    ->canon_options = convert_canon_opts_to_runtime(
+                    canon_opts_instance, error_buf, error_buf_size);
+
+                // Validate the core func's type matches the canonical ABI
+                // flattening of the component functype
+                CanonicalOptions *canon_options =
+                    comp_instance->functions[comp_instance->functions_count]
+                        ->canon_options;
+                LiftLowerContext validate_cx;
+                memset(&validate_cx, 0, sizeof(validate_cx));
+                validate_cx.canonical_opts = canon_options;
+                validate_cx.inst = comp_instance;
+                validate_cx.borrow_scope_type = BORROW_SCOPE_NONE;
 
                 WASMComponentFuncTypeInstance *func_type_inst =
                     comp_instance->types[canon->canon_data.lift.type_idx]
@@ -1360,6 +1379,92 @@ wasm_resolve_canon(WASMComponentCanonSection *canon_section,
                     set_error_buf_ex(error_buf, error_buf_size,
                                      "ERROR: canon lift: component function "
                                      "type not fully instantiated");
+                    return false;
+                }
+                if (!canon_options) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: canon lift: failed to resolve "
+                                     "canonical options");
+                    return false;
+                }
+
+                WASMComponentCoreFuncType expected_ft;
+                memset(&expected_ft, 0, sizeof(expected_ft));
+                if (!flatten_functype(&validate_cx, func_type_inst,
+                                      FLATTEN_CONTEXT_LIFT, &expected_ft)) {
+                    free_core_functype(&expected_ft);
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "ERROR: Failed to flatten functype for canon lift");
+                    return false;
+                }
+
+                WASMFunctionInstance *core_func_lift =
+                    comp_instance
+                        ->core_functions[canon->canon_data.lift.core_func_idx];
+                bool type_ok = check_functype_match(
+                    core_func_lift, &expected_ft, error_buf, error_buf_size);
+
+                // realloc must have type (i32 i32 i32 i32) -> (i32)
+                if (type_ok && canon_options->lift_lower_opts->realloc_func) {
+                    static const uint8 realloc_params[] = { VALUE_TYPE_I32,
+                                                            VALUE_TYPE_I32,
+                                                            VALUE_TYPE_I32,
+                                                            VALUE_TYPE_I32 };
+                    static const uint8 realloc_results[] = { VALUE_TYPE_I32 };
+                    type_ok = check_fixed_functype(
+                        canon_options->lift_lower_opts->realloc_func, 4,
+                        realloc_params, 1, realloc_results, "realloc",
+                        error_buf, error_buf_size);
+                }
+
+                // post-return params must match the flat results of the lifted
+                // function, no results
+                if (type_ok && canon_options->post_return_func) {
+                    WASMFunctionInstance *pr_func =
+                        canon_options->post_return_func;
+                    const WASMFuncType *pr_ft =
+                        pr_func->is_import_func
+                            ? pr_func->u.func_import->func_type
+                            : pr_func->u.func->func_type;
+                    if ((uint32)pr_func->param_count
+                            != expected_ft.results.count
+                        || pr_ft->result_count != 0) {
+                        set_error_buf_ex(
+                            error_buf, error_buf_size,
+                            "ERROR: post-return function has wrong signature");
+                        type_ok = false;
+                    }
+                    uint32 j = 0;
+                    for (j = 0; type_ok && j < (uint32)pr_func->param_count;
+                         j++) {
+                        uint8 exp = core_valtype_to_byte(
+                            &expected_ft.results.val_types[j]);
+                        if (pr_func->param_types[j] != exp) {
+                            set_error_buf_ex(error_buf, error_buf_size,
+                                             "ERROR: post-return function "
+                                             "param[%u] type mismatch",
+                                             j);
+                            type_ok = false;
+                        }
+                    }
+                }
+
+                // callback must have type (i32 i32 i32) -> (i32)
+                if (type_ok && canon_options->callback_func) {
+                    static const uint8 callback_params[] = { VALUE_TYPE_I32,
+                                                             VALUE_TYPE_I32,
+                                                             VALUE_TYPE_I32 };
+                    static const uint8 callback_results[] = { VALUE_TYPE_I32 };
+                    type_ok = check_fixed_functype(canon_options->callback_func,
+                                                   3, callback_params, 1,
+                                                   callback_results, "callback",
+                                                   error_buf, error_buf_size);
+                }
+
+                free_core_functype(&expected_ft);
+
+                if (!type_ok) {
                     return false;
                 }
 
@@ -1385,6 +1490,13 @@ wasm_resolve_canon(WASMComponentCanonSection *canon_section,
                     ->core_functions[comp_instance->core_functions_count] =
                     &comp_instance->defined_core_functions
                          [comp_instance->defined_core_functions_count];
+
+                // Clear fields that shouldn't be copied from the source - It
+                // may contain garbage
+                comp_instance
+                    ->core_functions[comp_instance->core_functions_count]
+                    ->canon_options = NULL;
+
                 canon_opts_definition = canon->canon_data.lower.canon_opts;
                 if (canon_opts_definition
                     && canon_opts_definition->canon_opts_count) {
@@ -1398,8 +1510,69 @@ wasm_resolve_canon(WASMComponentCanonSection *canon_section,
 
                 comp_instance
                     ->core_functions[comp_instance->core_functions_count]
+                    ->canon_options = convert_canon_opts_to_runtime(
+                    canon_opts_instance, error_buf, error_buf_size);
+
+                comp_instance
+                    ->core_functions[comp_instance->core_functions_count]
                     ->component_function =
                     comp_instance->functions[canon->canon_data.lower.func_idx];
+
+                // Validate: flatten the component functype with LOWER context
+                // and check realloc signature.
+                WASMComponentFunctionInstance *lower_comp_func =
+                    comp_instance->functions[canon->canon_data.lower.func_idx];
+                CanonicalOptions *lower_canon_options =
+                    comp_instance
+                        ->core_functions[comp_instance->core_functions_count]
+                        ->canon_options;
+
+                if (lower_comp_func->func_type
+                    && lower_comp_func->func_type->params
+                    && lower_comp_func->func_type->results
+                    && lower_canon_options) {
+                    LiftLowerContext lower_validate_cx;
+                    WASMComponentCoreFuncType lower_expected_ft;
+                    bool lower_type_ok = true;
+
+                    memset(&lower_validate_cx, 0, sizeof(lower_validate_cx));
+                    lower_validate_cx.canonical_opts = lower_canon_options;
+                    lower_validate_cx.inst = comp_instance;
+                    lower_validate_cx.borrow_scope_type = BORROW_SCOPE_NONE;
+
+                    memset(&lower_expected_ft, 0, sizeof(lower_expected_ft));
+                    if (!flatten_functype(
+                            &lower_validate_cx, lower_comp_func->func_type,
+                            FLATTEN_CONTEXT_LOWER, &lower_expected_ft)) {
+                        free_core_functype(&lower_expected_ft);
+                        set_error_buf_ex(error_buf, error_buf_size,
+                                         "ERROR: Failed to flatten functype "
+                                         "for canon lower");
+                        return false;
+                    }
+
+                    // realloc must have type (i32 i32 i32 i32) -> (i32)
+                    if (lower_canon_options->lift_lower_opts
+                        && lower_canon_options->lift_lower_opts->realloc_func) {
+                        static const uint8 realloc_params[] = {
+                            VALUE_TYPE_I32, VALUE_TYPE_I32, VALUE_TYPE_I32,
+                            VALUE_TYPE_I32
+                        };
+                        static const uint8 realloc_results[] = {
+                            VALUE_TYPE_I32
+                        };
+                        lower_type_ok = check_fixed_functype(
+                            lower_canon_options->lift_lower_opts->realloc_func,
+                            4, realloc_params, 1, realloc_results,
+                            "realloc (canon lower)", error_buf, error_buf_size);
+                    }
+
+                    free_core_functype(&lower_expected_ft);
+
+                    if (!lower_type_ok) {
+                        return false;
+                    }
+                }
 
                 comp_instance->core_functions_count++;
                 comp_instance->defined_core_functions_count++;

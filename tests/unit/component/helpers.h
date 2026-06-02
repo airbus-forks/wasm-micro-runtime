@@ -8,6 +8,7 @@
 
 #include "wasm_export.h"
 #include "wasm_component.h"
+#include "wasm_component_runtime.h"
 #include "wasm_memory.h"
 #include <string>
 #include <unordered_map>
@@ -23,6 +24,7 @@ class ComponentHelper
     RuntimeInitArgs init_args;
     unsigned char *component_raw = NULL;
     WASMComponent *component = NULL;
+    WASMComponentInstance *component_inst = NULL;
 
     uint32_t wasm_file_size = 0;
     uint32_t stack_size = 16 * 1024; // 16 KB
@@ -41,6 +43,7 @@ class ComponentHelper
 
     bool read_wasm_file(const char *wasm_file);
     bool load_component();
+    bool instantiate_component();
 
     // Helpers for tests
     uint32_t get_section_count() const;
@@ -52,6 +55,8 @@ class ComponentHelper
 
     std::vector<WASMComponentSection *> get_section(
         WASMComponentSectionType section_id) const;
+
+    std::vector<WASMMemoryInstance *> get_memories() const;
 
     void load_memory_offsets(
         const std::string

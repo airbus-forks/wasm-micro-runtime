@@ -39,6 +39,13 @@ ComponentHelper::do_teardown()
 {
     printf("Starting teardown\n");
 
+    if (component_instantiated) {
+        printf("Starting to deinstantiate component\n");
+        wasm_component_deinstantiate(this->component_inst);
+        component_inst = NULL;
+        component_instantiated = false;
+    }
+
     if (component_init) {
         printf("Starting to unload component\n");
         if (component) {
@@ -172,6 +179,39 @@ std::vector<WASMComponentSection*> ComponentHelper::get_section(WASMComponentSec
     }
 
     return sections;
+}
+
+std::vector<WASMMemoryInstance *>
+ComponentHelper::get_memories() const
+{
+    std::vector<WASMMemoryInstance*> vec;
+
+    for (uint32 i = 0; i < this->component_inst->core_memories_count; i++) {
+        vec.push_back(this->component_inst->core_memories[i]);
+    }
+
+    return vec;
+}
+
+bool ComponentHelper::instantiate_component() {
+    struct InstantiationArgs2 *inst_args;
+    if (!wasm_runtime_instantiation_args_create(&inst_args)) {
+        return false;
+    }
+
+    wasm_runtime_instantiation_args_set_default_stack_size(inst_args, stack_size);
+    wasm_runtime_instantiation_args_set_host_managed_heap_size(inst_args, heap_size);
+
+    this->component_inst = wasm_component_instantiate(this->component, this->error_buf, 128);
+
+    wasm_runtime_instantiation_args_destroy(inst_args);
+
+    if (!this->component_inst) {
+        return false;
+    }
+
+    component_instantiated = true;
+    return true;
 }
 
 void ComponentHelper::load_memory_offsets(const std::string& filename){

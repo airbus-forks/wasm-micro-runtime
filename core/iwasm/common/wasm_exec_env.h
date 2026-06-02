@@ -23,6 +23,7 @@ struct WASMInterpFrame;
 typedef struct WASMComponentInstance WASMComponentInstance;
 typedef struct WASMFunctionInstance WASMFunctionInstance;
 typedef struct WASMMemoryInstance WASMMemoryInstance;
+typedef struct LiftLowerContext LiftLowerContext;
 #endif
 
 #if WASM_ENABLE_THREAD_MGR != 0
@@ -188,6 +189,7 @@ typedef struct WASMExecEnv {
     struct WASMComponentInstance *component_inst;
     WASMFunctionInstance *core_func;
     WASMMemoryInstance *memory;
+    LiftLowerContext *cx;
 #endif
 
     /* The WASM stack of current thread */

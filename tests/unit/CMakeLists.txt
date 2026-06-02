@@ -97,6 +97,7 @@ add_subdirectory(exception-handling)
 add_subdirectory(running-modes)
 add_subdirectory(component)
 add_subdirectory(component-instantiation)
+add_subdirectory(canonical-abi)
 
 if(FULL_TEST)
   message(STATUS "FULL_TEST=ON: include llm-enhanced-test")

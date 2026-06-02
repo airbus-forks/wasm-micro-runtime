@@ -158,3 +158,57 @@ These index spaces are populated by iterating over the `WASMComponent` sections 
       - from WASI_P2 libraries, as defined by the [interfaces](https://github.com/WebAssembly/WASI/tree/main/proposals):
 11. **Export section** -- add elements to a list of `WASMComponentExportInstance` from a defined index space entry element
 12. **Value section** -- UNSUPORTED FOR NOW
+
+## Canonical ABI overview
+
+Canonical ABI defines the rules to convert between the values and functions of components in the `Component Model` and the values and functions of modules in `Core WebAssembly`.
+The Canonical ABI specifies, for each component function signature, a corresponding core function signature and the process for reading component-level values into and out of linear memory.
+
+Most Canonical ABI definitions depend on some ambient information which is established by the `canon lift` or `canon lower`.
+
+- `canon lift`: Upgrades a core WebAssembly function into a component-level function, mapping core Wasm types (like i32, f64) into higher-level WIT types (like strings, records, lists).
+- `canon lower`: Downgrades a component-level function into a core WebAssembly function, translating high-level WIT types back into low-level core Wasm representations and managing the associated memory allocation.
+
+Intermediate Representation: wit_value_t
+To manage the complex translation process between high-level WIT types and low-level Wasm memory arrays, WAMR introduces an intermediate representation (IR) abstraction known as wit_value_t.
+
+Instead of directly translating bytes from Wasm memory into native C variables and vice versa, Canonical ABI lifting and lowering operations interact strictly with wit_value_t data structures.
+
+During a lower operation (Component -> Core), host-provided arguments are packaged as wit_value_t structures, which WAMR then flattens and copies into the core Wasm linear memory.
+
+During a lift operation (Core -> Component), the raw memory segments returned by the Wasm module are parsed and wrapped into wit_value_t structures before being handed over to the host environment.
+
+This C-based struct acts as a universal container capable of representing any defined WIT type (e.g., primitives, variants, records, lists), heavily simplifying the type-checking and memory-parsing logic within the runtime.
+
+### Execution Model: Tasks and Subtasks
+
+Currently, the Canonical ABI operations in WAMR are implemented to run strictly synchronously. Threads are not utilized in the translation or execution pipeline.
+
+However, to align with the Canonical ABI specifications and future-proof the architecture for the WebAssembly `async` proposal, WAMR manages ABI operations using a **Task** and **Subtask** abstraction to describe the behavior of the embedder (the runtime):
+
+* **Tasks:** Created each time a component's **exported** function is called by the host. According to the specification, this theoretically spawns a new thread. In WAMR's current synchronous mode, this simply executes on the current thread, but the task boundary is maintained.
+* **Subtasks:** Created symmetrically when a component calls an **imported** function (a host function or another component's function), representing a nested execution context within the parent task.
+
+In the current implementation, all tasks and subtasks are executed immediately in a blocking, synchronous fashion. The infrastructure is intentionally designed this way so that state machines can easily be introduced later, allowing tasks to yield and resume without requiring a full structural rewrite when asynchronous Component Model features are officially supported.
+
+The WebAssembly Component Model bridges two distinct type systems: the rich, high-level Component Model (strings, records, variants) and the low-level Core WebAssembly (restricted to `i32`, `i64`, `f32`, `f64`, and linear memory). The Canonical ABI defines the exact rules for translating between these two worlds.
+
+**Core Concepts: Lifting and Lowering**
+To convert data across the ABI boundary, WAMR relies on two fundamental operations:
+* **Lifting (Memory → Component):** Reads values from the core Wasm linear memory and converts them into rich component types. For example, lifting translates a memory pointer and a length integer into a high-level string.
+* **Lowering (Component → Memory):** Writes rich component values into the core Wasm linear memory. For example, lowering takes a high-level string, writes its bytes into memory, and passes the resulting pointer and length to the core module.
+
+**Four-Layer Architecture**
+WAMR implements the Canonical ABI using a strict, bottom-up four-layer architecture to ensure type safety and separation of concerns:
+1.  **Layer 1: Raw Memory Operations (`load` / `store`):** The lowest level handles direct byte reads and writes against the `WASMMemoryInstance`. It performs strict bounds checking and manages primitive integer/float conversions.
+2.  **Layer 2: Individual Value Conversion (`lift_flat` / `lower_flat`):** Converts single values. It processes primitive types directly and delegates complex types (like strings or records) down to Layer 1.
+3.  **Layer 3: Multi-value Orchestration (`lift_flat_values` / `lower_flat_values`):** Manages multiple arguments or return values simultaneously. This layer is responsible for determining whether to pass data via registers or memory (the flattening optimization) and triggers memory allocation (`realloc`) when required.
+4.  **Layer 4: Function Wrappers (`canon_lift` / `canon_lower`):** The highest level intercepts cross-boundary function calls. It orchestrates the full lifecycle: lowering parameters, executing the target function, lifting the results, and returning them.
+
+**The Flattening Optimization**
+To maximize execution speed, WAMR implements the Canonical ABI's "flattening" optimization rule.
+* **Small payloads** (up to 16 parameters or 1 result in sync mode) are "flattened" and passed directly as individual core Wasm function parameters (e.g., `i32`, `i64`, `f32`, or `f64` values on the Wasm stack). This avoids the overhead of linear memory allocation. While WebAssembly itself is a stack-based machine without registers, passing flat parameters allows AOT or JIT compilers to efficiently optimize and map these values directly into native machine registers during execution.
+* **Large payloads** (like records exceeding the parameter limit) bypass this flattening process. Instead, they are written to linear memory, and only a single `i32` pointer to that memory block is passed on the stack.
+
+**Context and Memory Management**
+To keep the layers modular and future-proof for asynchronous execution, configuration is passed through a tiered context structure (`LiftLowerContext`). Operations that only read memory use a base `LiftOptions` context, while operations requiring memory modification use `LiftLowerOptions` (which includes the `realloc` allocator). The topmost function wrappers use a full `CanonicalOptions` context, which manages execution state (sync/async) and callbacks.
