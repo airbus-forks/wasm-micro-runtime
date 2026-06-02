@@ -66,16 +66,6 @@ wasm_component_parse_core_module_section(const uint8_t **payload,
                 "        Import %u: module=\"%s\", name=\"%s\", kind=%u\n", i,
                 import.module_name ? import.module_name : "<null>",
                 import.name ? import.name : "<null>", import.kind);
-
-            // Print more details about the import
-            if (import.module_name && strlen(import.module_name) == 0) {
-                LOG_DEBUG("          WARNING: Empty module name - this will "
-                          "cause 'unknown import' error\n");
-            }
-            if (import.name && strlen(import.name) == 0) {
-                LOG_DEBUG("          WARNING: Empty field name - this will "
-                          "cause 'unknown import' error\n");
-            }
         }
     }
 

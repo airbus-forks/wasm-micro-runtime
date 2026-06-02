@@ -29,6 +29,12 @@ typedef struct WASMTagInstance WASMTagInstance;
 #endif
 
 #if WASM_ENABLE_COMPONENT_MODEL != 0
+
+typedef struct WASMComponentInstance WASMComponentInstance;
+typedef struct WASMComponentCanonOptsInstance WASMComponentCanonOptsInstance;
+typedef struct WASMComponentFunctionInstance WASMComponentFunctionInstance;
+typedef struct WASMComponentResourceInstance WASMComponentResourceInstance;
+
 #include "../common/component-model/wasm_component.h"
 #endif
 
@@ -255,9 +261,11 @@ struct WASMFunctionInstance {
 #endif
 #if WASM_ENABLE_COMPONENT_MODEL != 0
     WASMModuleInstance *module_instance;
+    WASMComponentFunctionInstance *component_function;
     uint32 func_idx;
     bool is_canon_func;
     WASMComponentCanonType canon_type;
+    WASMComponentResourceInstance *resource;
 #endif
 };
 
@@ -625,6 +633,11 @@ wasm_set_exception_with_id(WASMModuleInstance *module_inst, uint32 id);
 
 const char *
 wasm_get_exception(WASMModuleInstance *module);
+
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+const char *
+wasm_component_get_exception(WASMComponentInstance *comp_inst);
+#endif
 
 /**
  * @brief Copy exception in buffer passed as parameter. Thread-safe version of

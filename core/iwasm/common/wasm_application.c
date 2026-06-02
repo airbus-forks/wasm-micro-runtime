@@ -304,7 +304,6 @@ wasm_application_execute_main(WASMModuleInstanceCommon *module_inst, int32 argc,
 /**
  * Implementation of wasm_application_execute_func()
  */
-
 static bool
 execute_func(WASMModuleInstanceCommon *module_inst, const char *name,
              int32 argc, char *argv[])

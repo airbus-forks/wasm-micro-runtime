@@ -112,3 +112,49 @@ component-model/
   wasm_component_export.c               # export runtime helpers
   wasm_component_export.h               # export declarations
 ```
+
+## Component instantiation overview
+
+The component instantiation takes a `WASMComponent` structure produced by the binary parser and outputs a `WASMComponentInstance` recursive structure that contains 12 fixed size arrays of component sort index spaces, as defined in [Explainer.md](https://github.com/WebAssembly/component-model/blob/main/design/mvp/Explainer.md):
+
+
+|      | Index space              | Data type                       |
+|------|--------------------------|---------------------------------|
+| 1    | component functions      | `WASMComponentFunctionInstance` |
+| 2    | component values         | `WASMComponentValue`            |
+| 3    | component types          | `WASMComponentTypeInstance`     |
+| 4    | component instances      | `WASMComponentInstance`         |
+| 5    | components               | `WASMComponentFunctionInstance` |
+| 6    | core functions           | `WASMFunctionInstance`          |
+| 7    | core tables              | `WASMTableInstance`             |
+| 8    | core memories            | `WASMMemoryInstance`            |
+| 9    | core globals             | `WASMGlobalInstance`            |
+| 10   | core types               | `WASMType`                      |
+| 11   | core module instaces     | `WASMModuleInstance`            |
+| 12   | core modules             | `WASMModule`                    |
+
+In adition, `WASMComponentInstance` also keeps track of component exports and WASI arguments information.
+
+These index spaces are populated by iterating over the `WASMComponent` sections in order and resolving them based on section type as follows:
+
+1. **Core module section** -- adds definition of a `WASMModule` to the **core modules** index space
+2. **Core instance section** -- adds a `WASMModuleInstance` to the **core module instances** index space by either:
+      - instantiating a previously defined `WASMModule` (by supplying a set of named arguments which satisfy all of its named imports) OR 
+      - creating one from a predefined list of exports
+3. **Core type section** -- adds a standart `WASMType` defintion to the **core types** index space
+4. **Component section** -- adds a `WASMComponent` definition to the **components** index spaces
+5. **Instance section** -- adds a `WASMComponentInstance` to the **component instances** index spaces by either:
+      - instantiating a previously defined  `WASMComponent`(by supplying a set of named arguments which satisfy all of its named imports) OR 
+      - creating one from a predefined list of exports
+6. **Alias section** -- populates a new index space entry from a another previusly defined one, as either:
+      - export alias -- adds an index space entry for a `WASMComponentFunctionInstance`, `WASMComponentTypeInstance` or `WASMComponentValue` from the exports of a previously defined `WASMComponentInstance`
+      - core export alias -- adds an index space entry for a `WASMFunctionInstance`, `WASMType`, `WASMTableInstance` or `WASMGlobalInstance` from the exports of a previously defined `WASMModuleInstance`
+      - outer alias -- adds a new index space entry to a nested inner `WASMComponentInstance` from a previously defined index space entry from an enclosing outer `WASMComponentInstance` 
+7. **Type section** -- adds a `WASMComponentTypeInstance` component type, as defined by [Explainer.md type definitions](https://github.com/WebAssembly/component-model/blob/main/design/mvp/Explainer.md#type-definiti)
+8. **Canon section** -- adds a `WASMFunctionInstance` or `WASMComponentFunctionInstance` based on a canonical lift or lower definition, as defined in [CanonicalABI.md](https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md)
+9. **Start section** -- UNSUPORTED FOR NOW
+10. **Import section** -- fills index space entry by resolving the required imports of the component, either:
+      - from the exports of previously defined `WASMComponentInstance`s
+      - from WASI_P2 libraries, as defined by the [interfaces](https://github.com/WebAssembly/WASI/tree/main/proposals):
+11. **Export section** -- add elements to a list of `WASMComponentExportInstance` from a defined index space entry element
+12. **Value section** -- UNSUPORTED FOR NOW

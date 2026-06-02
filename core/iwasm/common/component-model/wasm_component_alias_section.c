@@ -4,6 +4,7 @@
  */
 
 #include "wasm_component.h"
+#include "wasm_component_runtime.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -217,4 +218,434 @@ wasm_component_free_alias_section(WASMComponentSection *section)
     }
     wasm_runtime_free(alias_sec);
     section->parsed.alias_section = NULL;
+}
+
+/// @brief Retrieve the aliased sort from the target instance
+/// @param target Component instance / Core instance / Outer component instance
+/// @return Aliased sort / core sort reference passed as void*
+void *
+get_alias(WASMComponentAliasTarget *target, char *error_buf,
+          uint32 error_buf_size)
+{
+
+    if (!target) {
+        set_error_buf_ex(error_buf, error_buf_size, "Invalid alias target\n");
+        return NULL;
+    }
+    uint32 idx = 0;
+    // Outer aliases
+    if (target->type == WASM_COMP_ALIAS_TARGET_OUTER) {
+        WASMComponentInstance *inst = target->target.instance;
+        idx = target->ref.idx;
+        switch (target->sort->sort) {
+            case WASM_COMP_SORT_CORE_SORT:
+                switch (target->sort->core_sort) {
+                    case WASM_COMP_CORE_SORT_FUNC:
+                        if (inst->core_functions_count <= idx) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Core function index exceeded\n");
+                            return NULL;
+                        }
+                        return (void *)inst->core_functions[idx];
+                    case WASM_COMP_CORE_SORT_TABLE:
+                        if (inst->core_tables_count <= idx) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Core tables index exceeded\n");
+                            return NULL;
+                        }
+                        return (void *)inst->core_tables[idx];
+                    case WASM_COMP_CORE_SORT_MEMORY:
+                        if (inst->core_memories_count <= idx) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Core memories index exceeded\n");
+                            return NULL;
+                        }
+                        return (void *)inst->core_memories[idx];
+                    case WASM_COMP_CORE_SORT_GLOBAL:
+                        if (inst->core_globals_count <= idx) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Core globals index exceeded\n");
+                            return NULL;
+                        }
+                        return (void *)inst->core_globals[idx];
+                    case WASM_COMP_CORE_SORT_TYPE:
+                        if (inst->core_types_count <= idx) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Core types index exceeded\n");
+                            return NULL;
+                        }
+                        return (void *)inst->core_types[idx];
+                    case WASM_COMP_CORE_SORT_MODULE:
+                        if (inst->core_modules_count <= idx) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Core modules index exceeded\n");
+                            return NULL;
+                        }
+                        return (void *)inst->core_modules[idx];
+                    case WASM_COMP_CORE_SORT_INSTANCE:
+                        if (inst->core_module_instances_count <= idx) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Core instances index exceeded\n");
+                            return NULL;
+                        }
+                        return (void *)inst->core_module_instances[idx];
+                    default:
+                        break;
+                }
+                break;
+            case WASM_COMP_SORT_FUNC:
+                if (inst->functions_count <= idx) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Functions index exceeded\n");
+                    return NULL;
+                }
+                return (void *)inst->functions[idx];
+                break;
+            case WASM_COMP_SORT_VALUE:
+                if (inst->values_count <= idx) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Values index exceeded\n");
+                    return NULL;
+                }
+                break;
+            case WASM_COMP_SORT_TYPE:
+                if (inst->types_count <= idx) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Types index exceeded\n");
+                    return NULL;
+                }
+                return (void *)inst->types[idx];
+            case WASM_COMP_SORT_COMPONENT:
+                if (inst->components_count <= idx) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Components index exceeded\n");
+                    return NULL;
+                }
+                return (void *)inst->components[idx];
+            case WASM_COMP_SORT_INSTANCE:
+                if (inst->component_instances_count <= idx) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Instances index exceeded\n");
+                    return NULL;
+                }
+                return (void *)inst->component_instances[idx];
+            default:
+                break;
+        }
+    }
+    else if (target->type == WASM_COMP_ALIAS_TARGET_CORE_EXPORT) {
+        WASMModuleInstance *core_inst = target->target.core_instance;
+        if (!target->target.core_instance) {
+            return NULL;
+        }
+        if (target->sort->sort) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "ERROR: Component level sort not supported for "
+                             "core export alias\n");
+            return NULL;
+        }
+        if (target->sort->core_sort > 3) {
+            set_error_buf_ex(
+                error_buf, error_buf_size,
+                "ERROR: Unsupported sort index %d for core alias (Core modules "
+                "only support function, table, memory, or global exports)\n",
+                target->sort->core_sort);
+            return NULL;
+        }
+        // Perform name and type check for the respective export
+        char *name = target->ref.name->name;
+        const char *target_name = NULL;
+        LOG_DEBUG("  Alias core export name : %s", name);
+        // Retrieve core export
+        switch (target->sort->core_sort) {
+            case WASM_COMP_CORE_SORT_FUNC:
+                for (idx = 0; idx < core_inst->export_func_count; idx++) {
+                    target_name = core_inst->export_functions[idx].name;
+                    if (!strcmp(name, target_name)) {
+                        return (void *)core_inst->export_functions[idx]
+                            .function;
+                    }
+                };
+                LOG_WARNING("Export func not found in core exports\n");
+                return NULL;
+
+            case WASM_COMP_CORE_SORT_TABLE:
+                for (idx = 0; idx < core_inst->export_table_count; idx++) {
+                    target_name = core_inst->export_tables[idx].name;
+                    if (!strcmp(name, target_name)) {
+                        set_error_buf_ex(error_buf, error_buf_size,
+                                         "Found table \n");
+                        return (void *)core_inst->export_tables[idx].table;
+                    }
+                };
+                LOG_WARNING("Export table not found in core exports\n");
+                return NULL;
+            case WASM_COMP_CORE_SORT_MEMORY:
+                for (idx = 0; idx < core_inst->export_memory_count; idx++) {
+                    target_name = core_inst->export_memories[idx].name;
+                    if (!strcmp(name, target_name)) {
+                        return (void *)core_inst->export_memories[idx].memory;
+                    }
+                };
+                LOG_WARNING("Export memory not found in core exports\n");
+                return NULL;
+            case WASM_COMP_CORE_SORT_GLOBAL:
+                for (idx = 0; idx < core_inst->export_global_count; idx++) {
+                    target_name = core_inst->export_globals[idx].name;
+                    if (!strcmp(name, target_name)) {
+                        return (void *)core_inst->export_globals[idx].global;
+                    }
+                };
+                LOG_WARNING("Export global not found in core exports\n");
+                return NULL;
+            default:
+                break;
+        }
+    }
+    else if (target->type == WASM_COMP_ALIAS_TARGET_EXPORT) {
+        WASMComponentInstance *inst = target->target.instance;
+        char *name = target->ref.name->name;
+        const char *target_name = NULL;
+        bool is_found = false;
+        WASMComponentExportInstance *export = NULL;
+        LOG_DEBUG("  Alias export name : %s", name);
+        for (idx = 0; idx < inst->exports_count; idx++) {
+            export = &inst->exports[idx];
+            if (export->export_name->tag == WASM_COMP_IMPORTNAME_SIMPLE) {
+                target_name = export->export_name->exported.simple.name->name;
+            }
+            else if (export->export_name->tag
+                     == WASM_COMP_IMPORTNAME_VERSIONED) {
+                target_name =
+                    export->export_name->exported.versioned.name->name;
+            }
+            else {
+                set_error_buf_ex(
+                    error_buf, error_buf_size,
+                    "ERROR: Component Export tag %d not supported\n",
+                    export->export_name->tag);
+                return NULL;
+            }
+            if (!strcmp(name, target_name)) {
+                if ((target->sort->sort
+                     && (target->sort->sort != export->type))) {
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "ERROR: Type of desired export \"%s\" doesn't match",
+                        name);
+                    return NULL;
+                }
+                is_found = true;
+                break;
+            }
+        }
+        if (!is_found) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "Export NOT found in targte exports\n");
+            return NULL;
+        }
+        // Export was found
+        switch (target->sort->sort) {
+            // TODO: type checking for the export
+            case WASM_COMP_SORT_CORE_SORT:
+                if (target->sort->core_sort != 0x11) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Component export disallows core "
+                                     "sorts other than core module\n");
+                    return NULL;
+                }
+                return (void *)export->exp.core_module;
+            case WASM_COMP_SORT_FUNC:
+                return (void *)export->exp.function;
+            case WASM_COMP_SORT_VALUE:
+                // TODO: not in scope for now
+                return NULL;
+            case WASM_COMP_SORT_TYPE:
+                return (void *)export->exp.type;
+            case WASM_COMP_SORT_COMPONENT:
+                return (void *)export->exp.component;
+            case WASM_COMP_SORT_INSTANCE:
+                return (void *)export->exp.instance;
+            default:
+                set_error_buf_ex(error_buf, error_buf_size,
+                                 "ERROR: Invalid sort %d\n",
+                                 target->sort->sort);
+                return NULL;
+        }
+    }
+    else {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "ERROR: Alias type not recognised");
+        return NULL;
+    }
+    return NULL;
+}
+
+bool
+wasm_resolve_alias(WASMComponentAliasSection *alias_section,
+                   WASMComponentInstance *comp_instance, char *error_buf,
+                   uint32 error_buf_size)
+{
+    uint32 idx = 0;
+    WASMComponentAliasDefinition *alias = NULL;
+    for (idx = 0; idx < alias_section->count; idx++) {
+        alias = &alias_section->aliases[idx];
+        WASMComponentAliasTarget target_instance;
+        target_instance.type = alias->alias_target_type;
+        target_instance.sort = alias->sort;
+
+        if (alias->alias_target_type == WASM_COMP_ALIAS_TARGET_OUTER) {
+            target_instance.target.instance = comp_instance;
+            for (uint32 ct = 0; ct < alias->target.outer.ct; ct++) {
+                if (!target_instance.target.instance->parent) {
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "ERROR: Outer alias level %d not reachable, current "
+                        "instance has %d parent levels\n",
+                        alias->target.outer.ct, ct);
+                    return false;
+                }
+                target_instance.target.instance =
+                    target_instance.target.instance->parent;
+                target_instance.ref.idx = alias->target.outer.idx;
+            }
+        }
+        else if (alias->alias_target_type == WASM_COMP_ALIAS_TARGET_EXPORT) {
+            if (alias->target.exported.instance_idx
+                >= comp_instance->component_instances_count) {
+                set_error_buf_ex(error_buf, error_buf_size,
+                                 "Component instances index exceeded");
+                return false;
+            }
+            target_instance.target.instance =
+                comp_instance
+                    ->component_instances[alias->target.exported.instance_idx];
+            target_instance.ref.name = alias->target.exported.name;
+        }
+        else if (alias->alias_target_type
+                 == WASM_COMP_ALIAS_TARGET_CORE_EXPORT) {
+            if (alias->target.core_exported.instance_idx
+                > comp_instance->core_module_instances_count) {
+                return false;
+            }
+            target_instance.target.core_instance =
+                comp_instance->core_module_instances[alias->target.core_exported
+                                                         .instance_idx];
+            target_instance.ref.name = alias->target.core_exported.name;
+        }
+        else {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "Alias target type %d not recognised",
+                             alias->alias_target_type);
+        }
+        void *alias_ptr =
+            get_alias(&target_instance, error_buf, error_buf_size);
+        if (!alias_ptr) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "ERROR: Failed to retirieve alias\n");
+            return false;
+        }
+        switch (alias->sort->sort) {
+            case WASM_COMP_SORT_CORE_SORT:
+                switch (alias->sort->core_sort) {
+                    case WASM_COMP_CORE_SORT_FUNC:
+                        LOG_DEBUG("Added aliased core function");
+                        comp_instance->core_functions
+                            [comp_instance->core_functions_count] =
+                            (WASMFunctionInstance *)alias_ptr;
+                        comp_instance
+                            ->core_functions[comp_instance
+                                                 ->core_functions_count]
+                            ->module_instance =
+                            target_instance.target.core_instance;
+                        comp_instance->core_functions_count++;
+                        break;
+                    case WASM_COMP_CORE_SORT_TABLE:
+                        LOG_DEBUG("Added aliased core table");
+                        comp_instance
+                            ->core_tables[comp_instance->core_tables_count] =
+                            (WASMTableInstance *)alias_ptr;
+                        comp_instance->core_tables_count++;
+                        break;
+                    case WASM_COMP_CORE_SORT_MEMORY:
+                        LOG_DEBUG("Added aliased core memory");
+                        comp_instance->core_memories
+                            [comp_instance->core_memories_count] =
+                            (WASMMemoryInstance *)alias_ptr;
+                        comp_instance->core_memories_count++;
+                        break;
+                    case WASM_COMP_CORE_SORT_GLOBAL:
+                        LOG_DEBUG("Added aliased core global");
+                        comp_instance
+                            ->core_globals[comp_instance->core_globals_count] =
+                            (WASMGlobalInstance *)alias_ptr;
+                        comp_instance->core_globals_count++;
+                        break;
+                    case WASM_COMP_CORE_SORT_TYPE:
+                        LOG_DEBUG("Added aliased core type");
+                        comp_instance
+                            ->core_types[comp_instance->core_types_count] =
+                            (WASMType *)alias_ptr;
+                        comp_instance->core_types_count++;
+                        break;
+                    case WASM_COMP_CORE_SORT_MODULE:
+                        LOG_DEBUG("Added aliased core module");
+                        comp_instance
+                            ->core_modules[comp_instance->core_modules_count] =
+                            (WASMModule *)alias_ptr;
+                        comp_instance->core_modules_count++;
+                        break;
+                    case WASM_COMP_CORE_SORT_INSTANCE:
+                        LOG_DEBUG("Added aliased core instance");
+                        comp_instance->core_module_instances
+                            [comp_instance->core_module_instances_count] =
+                            (WASMModuleInstance *)alias_ptr;
+                        comp_instance->core_module_instances_count++;
+                        break;
+                    default:
+                        break;
+                }
+                break;
+            case WASM_COMP_SORT_FUNC:
+                comp_instance->functions[comp_instance->functions_count] =
+                    (WASMComponentFunctionInstance *)alias_ptr;
+                comp_instance->functions_count++;
+                break;
+            case WASM_COMP_SORT_VALUE:
+                LOG_DEBUG("Added aliased value");
+                comp_instance->values[comp_instance->values_count] =
+                    (WASMComponentValue *)alias_ptr;
+                comp_instance->values_count++;
+                break;
+            case WASM_COMP_SORT_TYPE:
+                LOG_DEBUG("Added aliased type");
+                comp_instance->types[comp_instance->types_count] =
+                    (WASMComponentTypeInstance *)alias_ptr;
+                comp_instance->types_count++;
+                break;
+            case WASM_COMP_SORT_COMPONENT:
+                LOG_DEBUG("Added aliased component");
+                comp_instance->components[comp_instance->components_count] =
+                    (WASMComponent *)alias_ptr;
+                comp_instance->components_count++;
+                break;
+            case WASM_COMP_SORT_INSTANCE:
+                LOG_DEBUG("Added aliased instance");
+                comp_instance->component_instances
+                    [comp_instance->component_instances_count] =
+                    (WASMComponentInstance *)alias_ptr;
+                comp_instance->component_instances_count++;
+                break;
+            default:
+                break;
+        }
+    }
+    return true;
 }

@@ -4,6 +4,7 @@
  */
 
 #include "wasm_component.h"
+#include "wasm_component_runtime.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -1074,4 +1075,484 @@ wasm_component_free_canons_section(WASMComponentSection *section)
     // sections
     wasm_runtime_free(canons_section);
     section->parsed.canon_section = NULL;
+}
+
+// Convert a WASMComponentCoreValType to its WASM binary encoding byte
+static uint8
+core_valtype_to_byte(const WASMComponentCoreValType *vt)
+{
+    switch (vt->tag) {
+        case WASM_CORE_VALTYPE_NUM:
+            return (uint8)vt->type.num_type;
+        case WASM_CORE_VALTYPE_VECTOR:
+            return (uint8)vt->type.vector_type;
+        case WASM_CORE_VALTYPE_REF:
+            return (uint8)vt->type.ref_type;
+        default:
+            return 0;
+    }
+}
+
+// Compare a WASMFunctionInstance's types against a flattened
+// WASMComponentCoreFuncType
+static bool
+check_functype_match(WASMFunctionInstance *core_func,
+                     WASMComponentCoreFuncType *expected, char *error_buf,
+                     uint32 error_buf_size)
+{
+    WASMFuncType *actual_ft = core_func->is_import_func
+                                  ? core_func->u.func_import->func_type
+                                  : core_func->u.func->func_type;
+    uint32 i = 0;
+
+    if (expected->params.count != core_func->param_count) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "ERROR: canon lift: core func param count mismatch "
+                         "(expected %u, got %u)",
+                         expected->params.count,
+                         (uint32)core_func->param_count);
+        return false;
+    }
+
+    for (i = 0; i < expected->params.count; i++) {
+        uint8 exp = core_valtype_to_byte(&expected->params.val_types[i]);
+        if (core_func->param_types[i] != exp) {
+            set_error_buf_ex(
+                error_buf, error_buf_size,
+                "ERROR: canon lift: core func param[%u] type mismatch", i);
+            return false;
+        }
+    }
+
+    if (expected->results.count != (uint32)actual_ft->result_count) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "ERROR: canon lift: core func result count mismatch "
+                         "(expected %u, got %u)",
+                         expected->results.count,
+                         (uint32)actual_ft->result_count);
+        return false;
+    }
+
+    for (i = 0; i < expected->results.count; i++) {
+        uint8 exp = core_valtype_to_byte(&expected->results.val_types[i]);
+        if (actual_ft->types[actual_ft->param_count + i] != exp) {
+            set_error_buf_ex(
+                error_buf, error_buf_size,
+                "ERROR: canon lift: core func result[%u] type mismatch", i);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Verify a core func has a specific fixed signature
+static bool
+check_fixed_functype(WASMFunctionInstance *func, uint32 expected_param_count,
+                     const uint8 *expected_params, uint32 expected_result_count,
+                     const uint8 *expected_results, const char *opt_name,
+                     char *error_buf, uint32 error_buf_size)
+{
+    const WASMFuncType *ft = func->is_import_func
+                                 ? func->u.func_import->func_type
+                                 : func->u.func->func_type;
+    uint32 i = 0;
+
+    if ((uint32)func->param_count != expected_param_count
+        || (uint32)ft->result_count != expected_result_count) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "ERROR: %s function has wrong signature", opt_name);
+        return false;
+    }
+
+    for (i = 0; i < expected_param_count; i++) {
+        if (func->param_types[i] != expected_params[i]) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "ERROR: %s function param[%u] type mismatch",
+                             opt_name, i);
+            return false;
+        }
+    }
+
+    for (i = 0; i < expected_result_count; i++) {
+        if (ft->types[expected_param_count + i] != expected_results[i]) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "ERROR: %s function result[%u] type mismatch",
+                             opt_name, i);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static WASMComponentCanonOptsInstance *
+fill_canon_opts(WASMComponentCanonOpts *canon_opts_definition,
+                WASMComponentCanonType type,
+                WASMComponentInstance *comp_instance, char *error_buf,
+                uint32 error_buf_size)
+{
+    uint64 size = 0;
+    uint32 opt_idx = 0;
+    WASMComponentCanonOptsInstance *canon_opts = NULL;
+    WASMComponentCanonOptInstance *canon_opt = NULL;
+
+    size = sizeof(WASMComponentCanonOptsInstance)
+           + canon_opts_definition->canon_opts_count
+                 * sizeof(WASMComponentCanonOptInstance);
+    if (size > comp_instance->defined_canon_opts_size) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "ERROR: Canon opts memory exceeded \n");
+        return NULL;
+    }
+    canon_opts =
+        (WASMComponentCanonOptsInstance *)comp_instance->defined_canon_opts;
+    canon_opts->canon_opts_count = canon_opts_definition->canon_opts_count;
+    canon_opt =
+        (WASMComponentCanonOptInstance *)((uint8_t *)canon_opts
+                                          + sizeof(
+                                              WASMComponentCanonOptsInstance));
+    canon_opts->type = type;
+    canon_opts->canon_opts = canon_opt;
+    for (opt_idx = 0; opt_idx < canon_opts->canon_opts_count;
+         opt_idx++, canon_opt++) {
+        canon_opt->tag = canon_opts_definition->canon_opts[opt_idx].tag;
+        switch (canon_opts_definition->canon_opts[opt_idx].tag) {
+            case WASM_COMP_CANON_OPT_MEMORY:
+                if (canon_opts_definition->canon_opts[opt_idx]
+                        .payload.memory.mem_idx
+                    >= comp_instance->core_memories_count) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Core memory index invalid\n");
+                    return NULL;
+                }
+                canon_opt->payload.memory =
+                    comp_instance->core_memories[canon_opts_definition
+                                                     ->canon_opts[opt_idx]
+                                                     .payload.memory.mem_idx];
+                // Memory must have at least 1 page
+                if (canon_opt->payload.memory->cur_page_count < 1) {
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "ERROR: canon memory must have at least 1 page");
+                    return NULL;
+                }
+                break;
+            case WASM_COMP_CANON_OPT_REALLOC:
+                if (canon_opts_definition->canon_opts[opt_idx]
+                        .payload.realloc_opt.func_idx
+                    >= comp_instance->core_functions_count) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Core function index invalid\n");
+                    return NULL;
+                }
+                canon_opt->payload.realloc_func =
+                    comp_instance
+                        ->core_functions[canon_opts_definition
+                                             ->canon_opts[opt_idx]
+                                             .payload.realloc_opt.func_idx];
+                break;
+            case WASM_COMP_CANON_OPT_POST_RETURN:
+                if (canon_opts_definition->canon_opts[opt_idx]
+                        .payload.post_return.func_idx
+                    >= comp_instance->core_functions_count) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Core function index invalid\n");
+                    return NULL;
+                }
+                canon_opt->payload.post_return_func =
+                    comp_instance
+                        ->core_functions[canon_opts_definition
+                                             ->canon_opts[opt_idx]
+                                             .payload.post_return.func_idx];
+                break;
+            case WASM_COMP_CANON_OPT_ASYNC:
+            case WASM_COMP_CANON_OPT_CALLBACK:
+                if (canon_opts_definition->canon_opts[opt_idx]
+                        .payload.callback.func_idx
+                    >= comp_instance->core_functions_count) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Core function index invalid\n");
+                    return NULL;
+                }
+                canon_opt->payload.callback_func =
+                    comp_instance
+                        ->core_functions[canon_opts_definition
+                                             ->canon_opts[opt_idx]
+                                             .payload.callback.func_idx];
+                break;
+            default:
+                break;
+        }
+    }
+
+    comp_instance->defined_canon_opts =
+        (void *)((uint8_t *)comp_instance->defined_canon_opts + size);
+    comp_instance->defined_canon_opts_size -= size;
+    return canon_opts;
+}
+
+bool
+wasm_resolve_canon(WASMComponentCanonSection *canon_section,
+                   WASMComponentInstance *comp_instance, char *error_buf,
+                   uint32 error_buf_size)
+{
+    uint32 idx = 0;
+    WASMComponentCanon *canon = NULL;
+    WASMComponentCanonOpts *canon_opts_definition = NULL;
+    WASMComponentCanonOptsInstance *canon_opts_instance = NULL;
+    WASMComponentCanonOptsInstance empty_canon_opts = { .canon_opts_count = 0 };
+
+    for (idx = 0; idx < canon_section->count; idx++) {
+        canon = &canon_section->canons[idx];
+        switch (canon->tag) {
+            case WASM_COMP_CANON_LIFT:
+                if (canon->canon_data.lift.core_func_idx
+                    >= comp_instance->core_functions_count) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Invalid core function index %d\n",
+                                     canon->canon_data.lift.core_func_idx);
+                    return false;
+                }
+                if (canon->canon_data.lift.type_idx
+                        >= comp_instance->types_count
+                    || comp_instance->types[canon->canon_data.lift.type_idx]
+                               ->type
+                           != COMPONENT_VAL_TYPE_FUNCTION) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Invalid type index %d\n",
+                                     canon->canon_data.lift.type_idx);
+                    return false;
+                }
+                comp_instance
+                    ->defined_functions[comp_instance->defined_functions_count]
+                    .core_func =
+                    comp_instance
+                        ->core_functions[canon->canon_data.lift.core_func_idx];
+                comp_instance
+                    ->defined_functions[comp_instance->defined_functions_count]
+                    .func_type =
+                    comp_instance->types[canon->canon_data.lift.type_idx]
+                        ->type_specific.function;
+
+                // Clear fields that shouldn't be copied from the source - It
+                // may contain garbage
+                comp_instance->functions[comp_instance->functions_count] =
+                    &comp_instance->defined_functions
+                         [comp_instance->defined_functions_count];
+
+                canon_opts_definition = canon->canon_data.lift.canon_opts;
+                if (canon_opts_definition
+                    && canon_opts_definition->canon_opts_count) {
+                    canon_opts_instance = fill_canon_opts(
+                        canon_opts_definition, canon->tag, comp_instance,
+                        error_buf, error_buf_size);
+                }
+                else {
+                    canon_opts_instance = &empty_canon_opts;
+                }
+
+                WASMComponentFuncTypeInstance *func_type_inst =
+                    comp_instance->types[canon->canon_data.lift.type_idx]
+                        ->type_specific.function;
+                if (!func_type_inst || !func_type_inst->params
+                    || !func_type_inst->results) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: canon lift: component function "
+                                     "type not fully instantiated");
+                    return false;
+                }
+
+                comp_instance->defined_functions_count++;
+                comp_instance->functions_count++;
+                LOG_DEBUG("Added lifted function");
+                break;
+            case WASM_COMP_CANON_LOWER:
+                if (canon->canon_data.lower.func_idx
+                    >= comp_instance->functions_count) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Invalid function index %d\n",
+                                     canon->canon_data.lower.func_idx);
+                    return false;
+                }
+                memcpy(
+                    &comp_instance->defined_core_functions
+                         [comp_instance->defined_core_functions_count],
+                    comp_instance->functions[canon->canon_data.lower.func_idx]
+                        ->core_func,
+                    sizeof(WASMFunctionInstance));
+                comp_instance
+                    ->core_functions[comp_instance->core_functions_count] =
+                    &comp_instance->defined_core_functions
+                         [comp_instance->defined_core_functions_count];
+                canon_opts_definition = canon->canon_data.lower.canon_opts;
+                if (canon_opts_definition
+                    && canon_opts_definition->canon_opts_count) {
+                    canon_opts_instance = fill_canon_opts(
+                        canon_opts_definition, canon->tag, comp_instance,
+                        error_buf, error_buf_size);
+                }
+                else {
+                    canon_opts_instance = &empty_canon_opts;
+                }
+
+                comp_instance
+                    ->core_functions[comp_instance->core_functions_count]
+                    ->component_function =
+                    comp_instance->functions[canon->canon_data.lower.func_idx];
+
+                comp_instance->core_functions_count++;
+                comp_instance->defined_core_functions_count++;
+                LOG_DEBUG("Added lowered function");
+                break;
+            case WASM_COMP_CANON_RESOURCE_DROP:
+                if (canon->canon_data.resource_drop.resource_type_idx
+                        >= comp_instance->types_count
+                    || (comp_instance
+                                ->types[canon->canon_data.resource_drop
+                                            .resource_type_idx]
+                                ->type
+                            != COMPONENT_VAL_TYPE_RESOURCE_SYNC
+                        && comp_instance
+                                   ->types[canon->canon_data.resource_drop
+                                               .resource_type_idx]
+                                   ->type
+                               != COMPONENT_VAL_TYPE_RESOURCE_ASYNC)) {
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "ERROR: Type %d is not a resource\n",
+                        canon->canon_data.resource_drop.resource_type_idx);
+                    return false;
+                }
+                if (!comp_instance
+                         ->types[canon->canon_data.resource_drop
+                                     .resource_type_idx]
+                         ->type_specific.resource->drop_method) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "Drop method not found\n");
+                    return false;
+                }
+                else {
+                    WASMFunctionInstance *drop_func =
+                        comp_instance
+                            ->types[canon->canon_data.resource_drop
+                                        .resource_type_idx]
+                            ->type_specific.resource->drop_method;
+                    // resource.drop: (param i32) -> ()
+                    if (!drop_func->is_canon_func) {
+                        static const uint8 drop_params[] = { VALUE_TYPE_I32 };
+                        if (!check_fixed_functype(drop_func, 1, drop_params, 0,
+                                                  NULL, "resource.drop",
+                                                  error_buf, error_buf_size))
+                            return false;
+                    }
+                    comp_instance
+                        ->core_functions[comp_instance->core_functions_count] =
+                        drop_func;
+                }
+                comp_instance->core_functions_count++;
+                break;
+            case WASM_COMP_CANON_RESOURCE_NEW:
+                if (canon->canon_data.resource_new.resource_type_idx
+                        >= comp_instance->types_count
+                    || (comp_instance
+                                ->types[canon->canon_data.resource_new
+                                            .resource_type_idx]
+                                ->type
+                            != COMPONENT_VAL_TYPE_RESOURCE_SYNC
+                        && comp_instance
+                                   ->types[canon->canon_data.resource_new
+                                               .resource_type_idx]
+                                   ->type
+                               != COMPONENT_VAL_TYPE_RESOURCE_ASYNC)) {
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "ERROR: Type %d is not a resource\n",
+                        canon->canon_data.resource_new.resource_type_idx);
+                    return false;
+                }
+                if (!comp_instance
+                         ->types[canon->canon_data.resource_new
+                                     .resource_type_idx]
+                         ->type_specific.resource->new_method) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "New method not found\n");
+                    return false;
+                }
+                else {
+                    WASMFunctionInstance *new_func =
+                        comp_instance
+                            ->types[canon->canon_data.resource_new
+                                        .resource_type_idx]
+                            ->type_specific.resource->new_method;
+                    // resource.new: (param i32) -> (result i32)
+                    if (!new_func->is_canon_func) {
+                        static const uint8 new_params[] = { VALUE_TYPE_I32 };
+                        static const uint8 new_results[] = { VALUE_TYPE_I32 };
+                        if (!check_fixed_functype(new_func, 1, new_params, 1,
+                                                  new_results, "resource.new",
+                                                  error_buf, error_buf_size))
+                            return false;
+                    }
+                    comp_instance
+                        ->core_functions[comp_instance->core_functions_count] =
+                        new_func;
+                }
+                comp_instance->core_functions_count++;
+                break;
+            case WASM_COMP_CANON_RESOURCE_REP:
+                if (canon->canon_data.resource_rep.resource_type_idx
+                        >= comp_instance->types_count
+                    || (comp_instance
+                                ->types[canon->canon_data.resource_rep
+                                            .resource_type_idx]
+                                ->type
+                            != COMPONENT_VAL_TYPE_RESOURCE_SYNC
+                        && comp_instance
+                                   ->types[canon->canon_data.resource_rep
+                                               .resource_type_idx]
+                                   ->type
+                               != COMPONENT_VAL_TYPE_RESOURCE_ASYNC)) {
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "ERROR: Type %d is not a resource\n",
+                        canon->canon_data.resource_rep.resource_type_idx);
+                    return false;
+                }
+                if (!comp_instance
+                         ->types[canon->canon_data.resource_rep
+                                     .resource_type_idx]
+                         ->type_specific.resource->rep_method) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "Rep method not found\n");
+                    return false;
+                }
+                else {
+                    WASMFunctionInstance *rep_func =
+                        comp_instance
+                            ->types[canon->canon_data.resource_rep
+                                        .resource_type_idx]
+                            ->type_specific.resource->rep_method;
+                    // resource.rep: (param i32) -> (result i32)
+                    if (!rep_func->is_canon_func) {
+                        static const uint8 rep_params[] = { VALUE_TYPE_I32 };
+                        static const uint8 rep_results[] = { VALUE_TYPE_I32 };
+                        if (!check_fixed_functype(rep_func, 1, rep_params, 1,
+                                                  rep_results, "resource.rep",
+                                                  error_buf, error_buf_size))
+                            return false;
+                    }
+                    comp_instance
+                        ->core_functions[comp_instance->core_functions_count] =
+                        rep_func;
+                }
+                comp_instance->core_functions_count++;
+                break;
+            default:
+                set_error_buf_ex(error_buf, error_buf_size,
+                                 "ERROR: Unsupported canonical option\n");
+                break;
+        }
+    }
+    return true;
 }

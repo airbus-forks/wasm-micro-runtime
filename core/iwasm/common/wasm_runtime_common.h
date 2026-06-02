@@ -28,6 +28,11 @@
 extern "C" {
 #endif
 
+/* Forward declarations for component types */
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+struct WASMComponentInstance;
+#endif
+
 /* Internal use for setting default running mode */
 #define Mode_Default 0
 
@@ -956,6 +961,12 @@ wasm_runtime_set_exception(WASMModuleInstanceCommon *module,
 /* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN const char *
 wasm_runtime_get_exception(WASMModuleInstanceCommon *module);
+
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+/* See wasm_export.h for description */
+WASM_RUNTIME_API_EXTERN const char *
+wasm_component_runtime_get_exception(WASMComponentInstance *component);
+#endif
 
 /* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN void

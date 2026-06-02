@@ -10,6 +10,9 @@
 #include "wasm_native.h"
 #include "wasm_runtime_common.h"
 #include "wasm_memory.h"
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+#include "component-model/wasm_component_runtime.h"
+#endif
 #if WASM_ENABLE_INTERP != 0
 #include "../interpreter/wasm_runtime.h"
 #endif
@@ -3321,6 +3324,17 @@ wasm_get_exception(WASMModuleInstance *module_inst)
         return module_inst->cur_exception;
 }
 
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+const char *
+wasm_component_get_exception(WASMComponentInstance *comp_inst)
+{
+    if (comp_inst->cur_exception[0] == '\0')
+        return NULL;
+    else
+        return comp_inst->cur_exception;
+}
+#endif
+
 bool
 wasm_copy_exception(WASMModuleInstance *module_inst, char *exception_buf)
 {
@@ -3363,6 +3377,14 @@ wasm_runtime_get_exception(WASMModuleInstanceCommon *module_inst_comm)
               || module_inst_comm->module_type == Wasm_Module_AoT);
     return wasm_get_exception(module_inst);
 }
+
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+const char *
+wasm_component_runtime_get_exception(WASMComponentInstance *comp_inst)
+{
+    return wasm_component_get_exception(comp_inst);
+}
+#endif
 
 bool
 wasm_runtime_copy_exception(WASMModuleInstanceCommon *module_inst_comm,

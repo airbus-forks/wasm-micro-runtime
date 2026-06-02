@@ -15,6 +15,7 @@
 #if WASM_ENABLE_COMPONENT_MODEL != 0
 #include "../common/component-model/wasm_component_export.h"
 #include "../common/component-model/wasm_component.h"
+#include "../common/component-model/wasm_component_runtime.h"
 #endif
 #if WASM_ENABLE_GC != 0
 #include "../common/gc/gc_object.h"
@@ -795,6 +796,7 @@ functions_instantiate(const WASMModule *module, WASMModuleInstance *module_inst,
     if (!(functions = runtime_malloc(total_size, error_buf, error_buf_size))) {
         return NULL;
     }
+    memset(functions, 0, (uint32)total_size);
 
     total_size = sizeof(void *) * (uint64)module->import_function_count;
     if (total_size > 0
@@ -1586,7 +1588,7 @@ export_tables_deinstantiate(WASMExportTabInstance *tables)
         wasm_runtime_free(tables);
 }
 
-#if WASM_ENABLE_MULTI_MEMORY != 0
+#if WASM_ENABLE_MULTI_MEMORY != 0 || WASM_ENABLE_COMPONENT_MODEL != 0
 static void
 export_memories_deinstantiate(WASMExportMemInstance *memories)
 {
@@ -2667,7 +2669,7 @@ wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
 
     /* export */
     module_inst->export_func_count = get_export_count(module, EXPORT_KIND_FUNC);
-#if WASM_ENABLE_MULTI_MEMORY != 0
+#if WASM_ENABLE_MULTI_MEMORY != 0 || WASM_ENABLE_COMPONENT_MODEL != 0
     module_inst->export_memory_count =
         get_export_count(module, EXPORT_KIND_MEMORY);
 #endif
@@ -2717,7 +2719,7 @@ wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
                      module, module_inst, module_inst->export_global_count,
                      error_buf, error_buf_size)))
 #endif
-#if WASM_ENABLE_MULTI_MEMORY != 0
+#if WASM_ENABLE_MULTI_MEMORY != 0 || WASM_ENABLE_COMPONENT_MODEL != 0
         || (module_inst->export_memory_count > 0
             && !(module_inst->export_memories = export_memories_instantiate(
                      module, module_inst, module_inst->export_memory_count,

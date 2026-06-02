@@ -4,6 +4,7 @@
  */
 
 #include "wasm_component.h"
+#include "wasm_component_runtime.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -12,12 +13,167 @@
 #include "wasm_export.h"
 #include <stdio.h>
 
+// Static primitive type instances
+static WASMComponentTypeInstance primitive_type_bool = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 1,
+    .elem_size = 1,
+    .type_specific.primval = WASM_COMP_PRIMVAL_BOOL
+};
+
+static WASMComponentTypeInstance primitive_type_s8 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 1,
+    .elem_size = 1,
+    .type_specific.primval = WASM_COMP_PRIMVAL_S8
+};
+
+static WASMComponentTypeInstance primitive_type_u8 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 1,
+    .elem_size = 1,
+    .type_specific.primval = WASM_COMP_PRIMVAL_U8
+};
+
+static WASMComponentTypeInstance primitive_type_s16 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 2,
+    .elem_size = 2,
+    .type_specific.primval = WASM_COMP_PRIMVAL_S16
+};
+
+static WASMComponentTypeInstance primitive_type_u16 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 2,
+    .elem_size = 2,
+    .type_specific.primval = WASM_COMP_PRIMVAL_U16
+};
+
+static WASMComponentTypeInstance primitive_type_s32 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 4,
+    .elem_size = 4,
+    .type_specific.primval = WASM_COMP_PRIMVAL_S32
+};
+
+static WASMComponentTypeInstance primitive_type_u32 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 4,
+    .elem_size = 4,
+    .type_specific.primval = WASM_COMP_PRIMVAL_U32
+};
+
+static WASMComponentTypeInstance primitive_type_s64 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 8,
+    .elem_size = 8,
+    .type_specific.primval = WASM_COMP_PRIMVAL_S64
+};
+
+static WASMComponentTypeInstance primitive_type_u64 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 8,
+    .elem_size = 8,
+    .type_specific.primval = WASM_COMP_PRIMVAL_U64
+};
+
+static WASMComponentTypeInstance primitive_type_f32 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 4,
+    .elem_size = 4,
+    .type_specific.primval = WASM_COMP_PRIMVAL_F32
+};
+
+static WASMComponentTypeInstance primitive_type_f64 = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 8,
+    .elem_size = 8,
+    .type_specific.primval = WASM_COMP_PRIMVAL_F64
+};
+
+static WASMComponentTypeInstance primitive_type_char = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 4,
+    .elem_size = 4,
+    .type_specific.primval = WASM_COMP_PRIMVAL_CHAR
+};
+
+static WASMComponentTypeInstance primitive_type_string = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 4,
+    .elem_size = 8,
+    .type_specific.primval = WASM_COMP_PRIMVAL_STRING
+};
+
+static WASMComponentTypeInstance primitive_type_error_context = {
+    .type = COMPONENT_VAL_TYPE_PRIMVAL,
+    .alignment = 4,
+    .elem_size = 4,
+    .type_specific.primval = WASM_COMP_PRIMVAL_ERROR_CONTEXT
+};
+
 static void
 free_component_instance_decl(WASMComponentInstDecl *decl);
 
 // Free helpers for nested component/instance/resource types
 static void
 free_component_types_entry(WASMComponentTypes *type);
+
+// Helper function to get static primitive type instance
+static inline WASMComponentTypeInstance *
+get_primitive_type_instance(WASMComponentPrimValType primval)
+{
+    switch (primval) {
+        case WASM_COMP_PRIMVAL_BOOL:
+            return &primitive_type_bool;
+        case WASM_COMP_PRIMVAL_S8:
+            return &primitive_type_s8;
+        case WASM_COMP_PRIMVAL_U8:
+            return &primitive_type_u8;
+        case WASM_COMP_PRIMVAL_S16:
+            return &primitive_type_s16;
+        case WASM_COMP_PRIMVAL_U16:
+            return &primitive_type_u16;
+        case WASM_COMP_PRIMVAL_S32:
+            return &primitive_type_s32;
+        case WASM_COMP_PRIMVAL_U32:
+            return &primitive_type_u32;
+        case WASM_COMP_PRIMVAL_S64:
+            return &primitive_type_s64;
+        case WASM_COMP_PRIMVAL_U64:
+            return &primitive_type_u64;
+        case WASM_COMP_PRIMVAL_F32:
+            return &primitive_type_f32;
+        case WASM_COMP_PRIMVAL_F64:
+            return &primitive_type_f64;
+        case WASM_COMP_PRIMVAL_CHAR:
+            return &primitive_type_char;
+        case WASM_COMP_PRIMVAL_STRING:
+            return &primitive_type_string;
+        case WASM_COMP_PRIMVAL_ERROR_CONTEXT:
+            return &primitive_type_error_context;
+        default:
+            return NULL;
+    }
+}
+
+// Helper function to assign type instance pointer based on value definition
+static inline void
+assign_type_instance(WASMComponentTypeInstance **val_instance,
+                     WASMComponentValueType *val_definition,
+                     WASMComponentTypeInstance **types)
+{
+    if (!val_definition) {
+        *val_instance = NULL;
+    }
+    else if (val_definition->type == WASM_COMP_VAL_TYPE_PRIMVAL) {
+        *val_instance = get_primitive_type_instance(
+            val_definition->type_specific.primval_type);
+    }
+    else {
+        *val_instance = types[val_definition->type_specific.type_idx];
+    }
+}
 
 // Helper function to parse record types
 static bool
@@ -2399,4 +2555,875 @@ wasm_component_free_types_section(WASMComponentSection *section)
     // Free the type section structure itself
     wasm_runtime_free(type_section);
     section->parsed.type_section = NULL;
+}
+
+uint32
+fill_resource_type_instance(WASMComponentTypeInstance **types,
+                            uint32 *curr_types_count, void *defined_types,
+                            uint32 defined_types_size,
+                            WASMComponentTypes *type_definition,
+                            WASMComponentInstance *comp_instance,
+                            char *error_buf, uint32 error_buf_size)
+{
+    uint32 size = 0;
+    uint32 types_count = *curr_types_count;
+    if (!types) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "ERROR: invalid types index space\n");
+        return 0;
+    }
+    WASMComponentTypeInstance *curr_type =
+        (WASMComponentTypeInstance *)defined_types;
+
+    LOG_DEBUG("Fill resource type instance");
+
+    size = sizeof(WASMComponentTypeInstance)
+           + sizeof(WASMComponentResourceInstance)
+           + 3 * sizeof(WASMFunctionInstance);
+    WASMComponentResourceInstance *resource =
+        (WASMComponentResourceInstance *)((uint8_t *)defined_types
+                                          + sizeof(WASMComponentTypeInstance));
+    WASMFunctionInstance *drop_method =
+        (WASMFunctionInstance *)((uint8_t *)resource
+                                 + sizeof(WASMComponentResourceInstance));
+    WASMFunctionInstance *new_method =
+        (WASMFunctionInstance *)((uint8_t *)drop_method
+                                 + sizeof(WASMFunctionInstance));
+    WASMFunctionInstance *rep_method =
+        (WASMFunctionInstance *)((uint8_t *)new_method
+                                 + sizeof(WASMFunctionInstance));
+
+    memset(resource, 0, sizeof(WASMComponentResourceInstance));
+    memset(drop_method, 0, sizeof(WASMFunctionInstance));
+    memset(new_method, 0, sizeof(WASMFunctionInstance));
+    memset(rep_method, 0, sizeof(WASMFunctionInstance));
+
+    drop_method->canon_type = WASM_COMP_CANON_RESOURCE_DROP;
+    drop_method->is_canon_func = true;
+    drop_method->param_cell_num = 1;
+    drop_method->ret_cell_num = 0;
+
+    new_method->canon_type = WASM_COMP_CANON_RESOURCE_NEW;
+    new_method->is_canon_func = true;
+    new_method->param_cell_num = 1;
+    new_method->ret_cell_num = 1;
+
+    rep_method->canon_type = WASM_COMP_CANON_RESOURCE_REP;
+    rep_method->is_canon_func = true;
+    rep_method->param_cell_num = 1;
+    rep_method->ret_cell_num = 1;
+
+    if (size > defined_types_size) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "Defined types alocated memory exceeded\n");
+        return 0;
+    }
+
+    WASMComponentResourceType *resource_definition =
+        type_definition->type.resource_type;
+    if (resource_definition->tag == WASM_COMP_RESOURCE_TYPE_ASYNC) {
+        LOG_WARNING("Async type not yet supported");
+        return 0;
+    }
+    if (resource_definition->resource.sync->has_dtor) {
+        if (resource_definition->resource.sync->dtor_func_idx
+            >= comp_instance->core_functions_count) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "Invalid index %d for dtor method\n",
+                             resource_definition->resource.sync->dtor_func_idx);
+            return 0;
+        }
+        WASMFunctionInstance *dtor_func =
+            comp_instance->core_functions[resource_definition->resource.sync
+                                              ->dtor_func_idx];
+        // destructor must have type (param i32) -> ()
+        if (!dtor_func->is_canon_func) {
+            const WASMFuncType *dtor_ft =
+                dtor_func->is_import_func ? dtor_func->u.func_import->func_type
+                                          : dtor_func->u.func->func_type;
+            if (dtor_func->param_count != 1
+                || dtor_func->param_types[0] != VALUE_TYPE_I32
+                || dtor_ft->result_count != 0) {
+                set_error_buf_ex(
+                    error_buf, error_buf_size,
+                    "resource destructor must have type (param i32) -> ()");
+                return 0;
+            }
+        }
+        resource->dtor_method = dtor_func;
+    }
+    resource->impl = comp_instance;
+    resource->drop_method = drop_method;
+    resource->new_method = new_method;
+    resource->rep_method = rep_method;
+    curr_type->type = COMPONENT_VAL_TYPE_RESOURCE_SYNC;
+    curr_type->type_specific.resource = resource;
+
+    types[types_count] = curr_type;
+    (*curr_types_count)++;
+
+    return size;
+}
+
+/// @brief Adds a new default value type to defined types memory section +
+/// refference to it in the types index space
+/// @param types Types index space entry ==> holds tag + pointer to type
+/// specific implementation (from defined_types)
+/// @param types_count current entry in types index space
+/// @param defined_types Pointer to the last free memory area in the defined
+/// types section ==> will hold the actual type defintion that the index space
+/// will point to
+/// @param defined_types_size Remaining free space for defined types allocation
+/// ==> used for checking for out of bounds allocation
+/// @param type_definition Type definition from Binary section, without index
+/// references resolved
+/// @return Returns size of the newly defined type ==> will be used to increment
+/// defined_types pointer to the next available memory area
+uint32
+fill_def_type_instance(WASMComponentTypeInstance **types,
+                       uint32 *curr_types_count, void *defined_types,
+                       uint32 defined_types_size,
+                       WASMComponentTypes *type_definition, char *error_buf,
+                       uint32 error_buf_size)
+{
+    uint32 size = 0, val_idx = 0;
+    uint32 types_count = *curr_types_count;
+    if (!types) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "ERROR: invalid types index space\n");
+        return 0;
+    }
+    WASMComponentTypeInstance *curr_type =
+        (WASMComponentTypeInstance *)defined_types;
+
+    switch (type_definition->type.def_val_type->tag) {
+        case WASM_COMP_DEF_VAL_PRIMVAL: // pvt:<primvaltype>
+            LOG_DEBUG("Fill primval type instance");
+            size = sizeof(WASMComponentTypeInstance);
+            if (size > defined_types_size)
+                goto fail;
+            curr_type->type = COMPONENT_VAL_TYPE_PRIMVAL;
+            curr_type->type_specific.primval =
+                type_definition->type.def_val_type->def_val.primval;
+
+            break;
+        // Record type (labeled fields)
+        case WASM_COMP_DEF_VAL_RECORD: // 0x72 lt*:vec(<labelvaltype>)
+            LOG_DEBUG("Fill record type instance");
+            WASMComponentRecordType *record_definition =
+                type_definition->type.def_val_type->def_val.record;
+            size = sizeof(WASMComponentTypeInstance)
+                   + sizeof(WASMComponentRecordInstance)
+                   + (record_definition->count)
+                         * sizeof(WASMComponentLabelValTypeInstance);
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentRecordInstance *record =
+                (WASMComponentRecordInstance *)((uint8_t *)defined_types
+                                                + sizeof(
+                                                    WASMComponentTypeInstance));
+            record->count = record_definition->count;
+            for (val_idx = 0; val_idx < record->count; val_idx++) {
+                record->fields[val_idx].label =
+                    record_definition->fields[val_idx].label;
+                assign_type_instance(
+                    &record->fields[val_idx].type,
+                    record_definition->fields[val_idx].value_type, types);
+            }
+            curr_type->type = COMPONENT_VAL_TYPE_RECORD;
+            curr_type->type_specific.record = record;
+
+            break;
+        // Variant type (labeled cases)
+        case WASM_COMP_DEF_VAL_VARIANT: // 0x71 case*:vec(<case>)
+            LOG_DEBUG("Fill variant type instance");
+            WASMComponentVariantType *variant_definition =
+                type_definition->type.def_val_type->def_val.variant;
+            size = sizeof(WASMComponentTypeInstance)
+                   + sizeof(WASMComponentVariantInstance)
+                   + variant_definition->count
+                         * sizeof(WASMComponentCaseValInstance);
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentVariantInstance *variant =
+                (WASMComponentVariantInstance
+                     *)((uint8_t *)defined_types
+                        + sizeof(WASMComponentTypeInstance));
+
+            variant->count = variant_definition->count;
+            for (val_idx = 0; val_idx < variant->count; val_idx++) {
+                variant->cases[val_idx].label =
+                    variant_definition->cases[val_idx].label;
+                assign_type_instance(
+                    &variant->cases[val_idx].value_type,
+                    variant_definition->cases[val_idx].value_type, types);
+            }
+            curr_type->type = COMPONENT_VAL_TYPE_VARIANT;
+            curr_type->type_specific.variant = variant;
+            break;
+        // List types
+        case WASM_COMP_DEF_VAL_LIST: // 0x70 t:<valtype>
+            LOG_DEBUG("Fill list type instance");
+            WASMComponentListType *list_definition =
+                type_definition->type.def_val_type->def_val.list;
+            size = sizeof(WASMComponentTypeInstance)
+                   + sizeof(WASMComponentListInstance);
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentListInstance *list =
+                (WASMComponentListInstance *)((uint8_t *)defined_types
+                                              + sizeof(
+                                                  WASMComponentTypeInstance));
+            assign_type_instance(&list->element_type,
+                                 list_definition->element_type, types);
+            curr_type->type = COMPONENT_VAL_TYPE_LIST;
+            curr_type->type_specific.list = list;
+            break;
+        case WASM_COMP_DEF_VAL_LIST_LEN: // 0x67 t:<valtype> len:<u32>
+            LOG_DEBUG("Fill fixed size list type instance");
+            WASMComponentListLenType *list_len_definition =
+                type_definition->type.def_val_type->def_val.list_len;
+            size = sizeof(WASMComponentTypeInstance)
+                   + sizeof(WASMComponentListLenInstance);
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentListLenInstance *list_len =
+                (WASMComponentListLenInstance
+                     *)((uint8_t *)defined_types
+                        + sizeof(WASMComponentTypeInstance));
+            list_len->len = list_len_definition->len;
+            assign_type_instance(&list_len->element_type,
+                                 list_len_definition->element_type, types);
+            curr_type->type = COMPONENT_VAL_TYPE_FIXED_SIZE_LIST;
+            curr_type->type_specific.list_len = list_len;
+            break;
+        // Tuple type
+        case WASM_COMP_DEF_VAL_TUPLE: // 0x6f t*:vec(<valtype>)
+            LOG_DEBUG("Fill tuple type instance");
+            WASMComponentTupleType *tuple_definition =
+                type_definition->type.def_val_type->def_val.tuple;
+            size =
+                sizeof(WASMComponentTypeInstance)
+                + sizeof(WASMComponentTupleInstance)
+                + tuple_definition->count * sizeof(WASMComponentTypeInstance *);
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentTupleInstance *tuple =
+                (WASMComponentTupleInstance *)((uint8_t *)defined_types
+                                               + sizeof(
+                                                   WASMComponentTypeInstance));
+
+            tuple->count = tuple_definition->count;
+            tuple->element_types =
+                (WASMComponentTypeInstance **)((char *)tuple
+                                               + sizeof(
+                                                   WASMComponentTupleInstance));
+            for (val_idx = 0; val_idx < tuple->count; val_idx++) {
+                LOG_DEBUG("Fill Tuple element %d, type %d", val_idx,
+                          tuple_definition->element_types[val_idx].type);
+                assign_type_instance(&tuple->element_types[val_idx],
+                                     &tuple_definition->element_types[val_idx],
+                                     types);
+            }
+            curr_type->type = COMPONENT_VAL_TYPE_TUPLE;
+            curr_type->type_specific.tuple = tuple;
+            break;
+        // Flags type
+        case WASM_COMP_DEF_VAL_FLAGS: // 0x6e l*:vec(<label'>)
+            LOG_DEBUG("Fill flags type instance");
+            size = sizeof(WASMComponentTypeInstance);
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentFlagType *flag =
+                type_definition->type.def_val_type->def_val.flag;
+            curr_type->type = COMPONENT_VAL_TYPE_FLAGS;
+            curr_type->type_specific.flag = flag;
+            break;
+        // Enum type
+        case WASM_COMP_DEF_VAL_ENUM: // 0x6d l*:vec(<label'>)
+            LOG_DEBUG("Fill enum type instance");
+            size = sizeof(WASMComponentTypeInstance);
+            WASMComponentEnumType *enum_definition =
+                type_definition->type.def_val_type->def_val.enum_type;
+            if (size > defined_types_size)
+                goto fail;
+            curr_type->type = COMPONENT_VAL_TYPE_ENUM;
+            curr_type->type_specific.enum_type = enum_definition;
+            break;
+        // Option type
+        case WASM_COMP_DEF_VAL_OPTION: // 0x6b t:<valtype>
+            LOG_DEBUG("Fill option type instance");
+            size = sizeof(WASMComponentTypeInstance)
+                   + sizeof(WASMComponentOptionInstance);
+            WASMComponentOptionInstance *option =
+                (WASMComponentOptionInstance *)((uint8_t *)defined_types
+                                                + sizeof(
+                                                    WASMComponentTypeInstance));
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentOptionType *option_definition =
+                type_definition->type.def_val_type->def_val.option;
+            assign_type_instance(&option->element_type,
+                                 option_definition->element_type, types);
+            curr_type->type = COMPONENT_VAL_TYPE_OPTION;
+            curr_type->type_specific.option = option;
+            break;
+        // Result type
+        case WASM_COMP_DEF_VAL_RESULT: // 0x6a t?:<valtype>? u?:<valtype>?
+            LOG_DEBUG("Fill result type instance");
+            size = sizeof(WASMComponentTypeInstance)
+                   + sizeof(WASMComponentResultInstance);
+            WASMComponentResultInstance *result =
+                (WASMComponentResultInstance *)((uint8_t *)defined_types
+                                                + sizeof(
+                                                    WASMComponentTypeInstance));
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentResultType *result_definition =
+                type_definition->type.def_val_type->def_val.result;
+            assign_type_instance(&result->result_type,
+                                 result_definition->result_type, types);
+            assign_type_instance(&result->error_type,
+                                 result_definition->error_type, types);
+            curr_type->type = COMPONENT_VAL_TYPE_RESULT;
+            curr_type->type_specific.result = result;
+            break;
+        // Handle types
+        case WASM_COMP_DEF_VAL_OWN: // 0x69 i:<typeidx>
+            LOG_DEBUG("Fill resource own type instance");
+            size = sizeof(WASMComponentTypeInstance)
+                   + sizeof(WASMComponentResourceHandleInstance);
+            WASMComponentResourceHandleInstance *resource_own =
+                (WASMComponentResourceHandleInstance
+                     *)((uint8_t *)defined_types
+                        + sizeof(WASMComponentTypeInstance));
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentOwnType *own_definition =
+                type_definition->type.def_val_type->def_val.owned;
+            if (own_definition->type_idx >= *curr_types_count
+                || types[own_definition->type_idx]->type
+                       != COMPONENT_VAL_TYPE_RESOURCE_SYNC) {
+                set_error_buf_ex(error_buf, error_buf_size,
+                                 "Type %d is not a resource\n",
+                                 own_definition->type_idx);
+                return 0;
+            }
+            resource_own->resource =
+                types[own_definition->type_idx]->type_specific.resource;
+            resource_own->is_borrow = false;
+            curr_type->type = COMPONENT_VAL_TYPE_OWN;
+            curr_type->type_specific.resource_handle = resource_own;
+            break;
+        case WASM_COMP_DEF_VAL_BORROW: // 0x68 i:<typeidx>
+            LOG_DEBUG("Fill resource borrow type instance");
+            size = sizeof(WASMComponentTypeInstance)
+                   + sizeof(WASMComponentResourceHandleInstance);
+            WASMComponentResourceHandleInstance *resource_borrow =
+                (WASMComponentResourceHandleInstance
+                     *)((uint8_t *)defined_types
+                        + sizeof(WASMComponentTypeInstance));
+            if (size > defined_types_size)
+                goto fail;
+            WASMComponentBorrowType *borrow_definition =
+                type_definition->type.def_val_type->def_val.borrow;
+            if (borrow_definition->type_idx >= *curr_types_count
+                || (types[borrow_definition->type_idx]->type
+                        != COMPONENT_VAL_TYPE_RESOURCE_SYNC
+                    && types[borrow_definition->type_idx]->type
+                           != COMPONENT_VAL_TYPE_RESOURCE_ASYNC)) {
+                set_error_buf_ex(error_buf, error_buf_size,
+                                 "Type %d is not a resource\n",
+                                 borrow_definition->type_idx);
+                return 0;
+            }
+            resource_borrow->resource =
+                types[borrow_definition->type_idx]->type_specific.resource;
+            resource_borrow->is_borrow = true;
+            curr_type->type = COMPONENT_VAL_TYPE_BORROW;
+            curr_type->type_specific.resource_handle = resource_borrow;
+            break;
+            // TODO
+        // Async types
+        case WASM_COMP_DEF_VAL_STREAM: // 0x66 t?:<valtype>?
+                                       // TODO
+        case WASM_COMP_DEF_VAL_FUTURE: // 0x65 t?:<valtype>?
+            // TODO
+            return 0;
+    }
+
+    types[types_count] = curr_type;
+    (*curr_types_count)++;
+
+    return size; // Returns the size of the newly added defined type, so that
+                 // defined_types pointer can be incremented by this ammount,
+                 // pointing to the next free location in defined types memory
+                 // area
+fail:
+    set_error_buf_ex(error_buf, error_buf_size,
+                     "Defined types alocated memory exceeded\n");
+    return 0;
+}
+
+/// @brief Adds a new function signature type to defined types memory section +
+/// refference to it in the types index space
+/// @param types Types index space entry ==> holds tag + pointer to type
+/// specific implementation (from defined_types)
+/// @param types_count current entry in types index space
+/// @param defined_types Pointer to the last free memory area in the defined
+/// types section ==> will hold the actual type defintion that the index space
+/// will point to
+/// @param defined_types_size Remaining free space for defined types allocation
+/// ==> used for checking for out of bounds allocation
+/// @param type_definition Type definition from Binary section, without index
+/// references resolved
+/// @return Returns size of the newly defined type ==> will be used to increment
+/// defined_types pointer to the next available memory area
+uint32
+fill_func_type_instance(WASMComponentTypeInstance **types, uint32 *types_count,
+                        void *defined_types, uint32 defined_types_size,
+                        WASMComponentTypes *type_definition, char *error_buf,
+                        uint32 error_buf_size)
+{
+    uint32 size = 0, val_idx = 0;
+    size = wasm_get_func_type_size(type_definition->type.func_type);
+    if (size > defined_types_size) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "Defined types alocated memory exceeded");
+        return 0;
+    }
+
+    // Allocation in memory:
+    /*
+    +-----------------------------------+
+    |  WASMComponentTypeInstance        |
+    +-----------------------------------+ ->type_specific.function
+    |  WASMComponentFuncTypeInstance    |
+    +-----------------------------------+ ->params
+    |  WASMComponentParamListInstance   |
+    +-----------------------------------+ ->results
+    |  WASMComponentResultListInstance  |
+    +-----------------------------------+
+    */
+
+    WASMComponentFuncType *defined_func = type_definition->type.func_type;
+
+    WASMComponentTypeInstance *curr_type =
+        (WASMComponentTypeInstance *)defined_types;
+    WASMComponentFuncTypeInstance *func_instance_type =
+        (WASMComponentFuncTypeInstance *)((uint8_t *)curr_type
+                                          + sizeof(WASMComponentTypeInstance));
+    WASMComponentParamListInstance *parameters =
+        (WASMComponentParamListInstance *)((uint8_t *)func_instance_type
+                                           + sizeof(
+                                               WASMComponentFuncTypeInstance));
+
+    // Parameters will be allocated first
+    parameters->count = defined_func->params->count;
+    for (val_idx = 0; val_idx < parameters->count; val_idx++) {
+        parameters->params[val_idx].label =
+            defined_func->params->params[val_idx].label;
+        assign_type_instance(&parameters->params[val_idx].type,
+                             defined_func->params->params[val_idx].value_type,
+                             types);
+    }
+    // Result is allocated second
+    WASMComponentResultListInstance *results =
+        (WASMComponentResultListInstance
+             *)((uint8_t *)parameters
+                + (parameters->count
+                   * sizeof(WASMComponentLabelValTypeInstance))
+                + sizeof(WASMComponentParamListInstance));
+
+    results->tag = defined_func->results->tag;
+    results->count = (results->tag == WASM_COMP_RESULT_LIST_WITH_TYPE) ? 1 : 0;
+    assign_type_instance(&results->result, defined_func->results->results,
+                         types);
+
+    func_instance_type->params = parameters;
+    func_instance_type->results = results;
+    curr_type->type = COMPONENT_VAL_TYPE_FUNCTION;
+    curr_type->type_specific.function = func_instance_type;
+
+    types[*types_count] = curr_type;
+    (*types_count)++;
+    return size;
+}
+
+uint32
+fill_instance_type_instance(WASMComponentTypeInstance **types,
+                            uint32 *types_count, void *defined_types,
+                            uint32 defined_types_size,
+                            WASMComponentTypes *type_definition,
+                            WASMComponentInstance *parent, char *error_buf,
+                            uint32 error_buf_size)
+{
+    WASMComponentInstanceDeclTypeSize instance_decl_size = { 0 };
+    uint32 size = 0, val_idx = 0, curr_type_size = 0;
+    size += wasm_get_inst_decl_size(type_definition->type.instance_type,
+                                    &instance_decl_size);
+    if (size > defined_types_size) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "Defined types alocated memory exceeded");
+        return 0;
+    }
+    LOG_DEBUG("Fill instance type instance: %d definitions, total size %d",
+              type_definition->type.instance_type->count, size);
+    WASMComponentInstDecl *instance_decl = NULL;
+
+    WASMComponentTypeInstance *curr_type =
+        (WASMComponentTypeInstance *)defined_types;
+    WASMComponentInstTypeInstance *inst_type_instance =
+        (WASMComponentInstTypeInstance *)((uint8_t *)defined_types
+                                          + sizeof(WASMComponentTypeInstance));
+    WASMComponentTypeInstance **inst_type_instance_types =
+        (WASMComponentTypeInstance **)((uint8_t *)inst_type_instance
+                                       + sizeof(WASMComponentInstTypeInstance));
+    WASMComponentFuncTypeInstance **inst_type_instance_funcs =
+        (WASMComponentFuncTypeInstance *
+             *)((uint8_t *)inst_type_instance_types
+                + (instance_decl_size.types_count
+                   * sizeof(WASMComponentTypeInstance *)));
+    WASMComponentExportInstance *inst_type_instance_exports =
+        (WASMComponentExportInstance
+             *)((uint8_t *)inst_type_instance_funcs
+                + (instance_decl_size.func_count
+                   * sizeof(WASMComponentFuncTypeInstance *)));
+    WASMFunctionInstance *inst_type_instance_core_funcs =
+        (WASMFunctionInstance *)((uint8_t *)inst_type_instance_exports
+                                 + (instance_decl_size.exports_count
+                                    * sizeof(WASMComponentExportInstance)));
+    WASMFunctionImport *inst_type_instance_core_func_imports =
+        (WASMFunctionImport *)((uint8_t *)inst_type_instance_core_funcs
+                               + ((instance_decl_size.func_count
+                                   + instance_decl_size.resource_count)
+                                  * sizeof(WASMFunctionInstance)));
+    void *inst_type_instance_defined_types =
+        (void *)((uint8_t *)inst_type_instance_core_func_imports
+                 + ((instance_decl_size.func_count
+                     + instance_decl_size.resource_count * 3)
+                    * sizeof(WASMFunctionImport)));
+
+    curr_type->type = COMPONENT_VAL_TYPE_INSTANCE;
+    curr_type->type_specific.instance = inst_type_instance;
+    inst_type_instance->types_count = 0;
+    inst_type_instance->types = inst_type_instance_types;
+    inst_type_instance->func_count = 0;
+    inst_type_instance->funcs = inst_type_instance_funcs;
+    inst_type_instance->exports_count = 0;
+    inst_type_instance->exports = inst_type_instance_exports;
+    inst_type_instance->defined_core_funcs = inst_type_instance_core_funcs;
+    for (val_idx = 0; val_idx < instance_decl_size.func_count
+                                    + instance_decl_size.resource_count;
+         val_idx++) {
+        inst_type_instance->defined_core_funcs[val_idx].u.func_import =
+            &inst_type_instance_core_func_imports[val_idx];
+    }
+
+    for (val_idx = 0; val_idx < type_definition->type.instance_type->count;
+         val_idx++) {
+        instance_decl =
+            &type_definition->type.instance_type->instance_decls[val_idx];
+
+        /*
+        +-------------------------------------------+
+        | WASMComponentTypeInstance                 |
+        +-------------------------------------------+
+        | WASMComponentInstTypeInstance             | ==> will hold pointers to
+        the vectors defined below
+        +-------------------------------------------+
+        | WASMComponentTypeInstance[types_count]    | ==> holds pointer to the
+        Defined Types implementations (or outer types)
+        +-------------------------------------------+
+        | WASMComponentFuncTypeInstance[func_count] |
+        +-------------------------------------------+
+        | WASMComponentExport[exports_count]        |
+        +-------------------------------------------+
+        | -- Defined Types --                       |
+        +-------------------------------------------+
+        */
+
+        switch (instance_decl->tag) {
+            case WASM_COMP_COMPONENT_DECL_INSTANCE_CORE_TYPE:
+                // TODO: not present in current test binaries
+                break;
+            case WASM_COMP_COMPONENT_DECL_INSTANCE_TYPE:
+                if (instance_decl->decl.type->tag == WASM_COMP_DEF_TYPE) {
+                    curr_type_size = fill_def_type_instance(
+                        inst_type_instance->types,
+                        &inst_type_instance->types_count,
+                        inst_type_instance_defined_types,
+                        instance_decl_size.types_size, instance_decl->decl.type,
+                        error_buf, error_buf_size);
+                    if (!curr_type_size) {
+                        return 0;
+                    }
+                    inst_type_instance_defined_types =
+                        (void *)((uint8_t *)inst_type_instance_defined_types
+                                 + curr_type_size);
+                }
+                else if (instance_decl->decl.type->tag == WASM_COMP_FUNC_TYPE) {
+                    curr_type_size = fill_func_type_instance(
+                        inst_type_instance->types,
+                        &inst_type_instance->types_count,
+                        inst_type_instance_defined_types,
+                        instance_decl_size.types_size, instance_decl->decl.type,
+                        error_buf, error_buf_size);
+                    if (!curr_type_size) {
+                        return 0;
+                    }
+                    inst_type_instance_defined_types =
+                        (void *)((uint8_t *)inst_type_instance_defined_types
+                                 + curr_type_size);
+                }
+                break;
+            case WASM_COMP_COMPONENT_DECL_INSTANCE_ALIAS:
+                WASMComponentAliasDefinition *alias = instance_decl->decl.alias;
+                if (instance_decl->decl.alias->alias_target_type
+                    != WASM_COMP_ALIAS_TARGET_OUTER) {
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "For now, only outer aliases are supported for "
+                        "instance type definitions\n");
+                    return false;
+                }
+                WASMComponentAliasTarget target_instance;
+                target_instance.target.instance = parent;
+                for (uint32 ct = 1;
+                     ct < instance_decl->decl.alias->target.outer.ct; ct++) {
+                    if (!target_instance.target.instance->parent) {
+                        set_error_buf_ex(
+                            error_buf, error_buf_size,
+                            "ERROR: Outer alias level %d not reachable, "
+                            "current instance has %d parent levels\n",
+                            instance_decl->decl.alias->target.outer.ct, ct);
+                        return false;
+                    }
+                    target_instance.target.instance =
+                        target_instance.target.instance->parent;
+                }
+                target_instance.ref.idx = alias->target.outer.idx;
+                target_instance.sort = alias->sort;
+                target_instance.type = WASM_COMP_ALIAS_TARGET_OUTER;
+                void *alias_ptr =
+                    get_alias(&target_instance, error_buf, error_buf_size);
+                if (!alias_ptr) {
+                    set_error_buf_ex(error_buf, error_buf_size,
+                                     "ERROR: Failed to retirieve alias\n");
+                    return false;
+                }
+                switch (target_instance.sort->sort) {
+                    case WASM_COMP_SORT_TYPE:
+                        inst_type_instance
+                            ->types[inst_type_instance->types_count] =
+                            (WASMComponentTypeInstance *)alias_ptr;
+                        inst_type_instance->types_count++;
+                        break;
+                    default:
+                        set_error_buf_ex(
+                            error_buf, error_buf_size,
+                            "For now only type outer aliases are supported in "
+                            "component instance definitions\n");
+                        break;
+                }
+                break;
+
+            case WASM_COMP_COMPONENT_DECL_INSTANCE_EXPORTDECL:
+                inst_type_instance->exports[inst_type_instance->exports_count]
+                    .export_name = instance_decl->decl.export_decl->export_name;
+                inst_type_instance->exports[inst_type_instance->exports_count]
+                    .type = instance_decl->decl.export_decl->extern_desc->type;
+                switch (instance_decl->decl.export_decl->extern_desc->type) {
+
+                    case WASM_COMP_EXTERN_TYPE:
+                        if (instance_decl->decl.export_decl->extern_desc
+                                ->extern_desc.type.type_bound->tag
+                            == WASM_COMP_TYPEBOUND_EQ) {
+                            inst_type_instance
+                                ->types[inst_type_instance->types_count] =
+                                inst_type_instance
+                                    ->types[instance_decl->decl.export_decl
+                                                ->extern_desc->extern_desc.type
+                                                .type_bound->type_idx];
+                            inst_type_instance
+                                ->exports[inst_type_instance->exports_count]
+                                .exp.type =
+                                inst_type_instance
+                                    ->types[inst_type_instance->types_count];
+                            inst_type_instance->types_count++;
+                            inst_type_instance->exports_count++;
+                        }
+                        else if (instance_decl->decl.export_decl->extern_desc
+                                     ->extern_desc.type.type_bound->tag
+                                 == WASM_COMP_TYPEBOUND_TYPE) {
+                            // Sub resource definition
+                            LOG_DEBUG("Fill sub resource type instance");
+                            curr_type_size =
+                                sizeof(WASMComponentTypeInstance)
+                                + sizeof(WASMComponentResourceInstance)
+                                + 3 * sizeof(WASMFunctionInstance);
+                            if (curr_type_size
+                                > instance_decl_size.types_size) {
+                                set_error_buf_ex(error_buf, error_buf_size,
+                                                 "Defined types size exceeded "
+                                                 "for sub resource\n");
+                                return 0;
+                            }
+
+                            WASMComponentResourceTypeSync resource_sync_type = {
+                                .has_dtor = false
+                            };
+                            WASMComponentResourceType resource_type_def = {
+                                .tag = WASM_COMP_RESOURCE_TYPE_SYNC,
+                                .resource.sync = &resource_sync_type
+                            };
+                            WASMComponentTypes resource_type = {
+                                .type.resource_type = &resource_type_def
+                            };
+                            fill_resource_type_instance(
+                                inst_type_instance->types,
+                                &inst_type_instance->types_count,
+                                inst_type_instance_defined_types,
+                                defined_types_size, &resource_type, parent,
+                                error_buf, error_buf_size);
+
+                            WASMComponentExportName *export_name =
+                                instance_decl->decl.export_decl->export_name;
+                            inst_type_instance
+                                ->types[inst_type_instance->types_count - 1]
+                                ->type_specific.resource->name =
+                                export_name->tag
+                                    ? export_name->exported.versioned.name->name
+                                    : export_name->exported.simple.name->name;
+                            inst_type_instance
+                                ->exports[inst_type_instance->exports_count]
+                                .exp.type =
+                                inst_type_instance
+                                    ->types[inst_type_instance->types_count
+                                            - 1];
+                            inst_type_instance->exports_count++;
+                            inst_type_instance_defined_types =
+                                (void *)((uint8_t *)
+                                             inst_type_instance_defined_types
+                                         + curr_type_size);
+                        }
+                        else {
+                            set_error_buf_ex(error_buf, error_buf_size,
+                                             "Type bound tab not recognised\n");
+                        }
+                        break;
+                    case WASM_COMP_EXTERN_FUNC:
+                        if (inst_type_instance
+                                ->types[instance_decl->decl.export_decl
+                                            ->extern_desc->extern_desc.func
+                                            .type_idx]
+                                ->type
+                            != COMPONENT_VAL_TYPE_FUNCTION) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "Function export extern declaration type index "
+                                "does not correspond to a function type\n");
+                            return 0;
+                        }
+                        inst_type_instance
+                            ->funcs[inst_type_instance->func_count] =
+                            inst_type_instance
+                                ->types[instance_decl->decl.export_decl
+                                            ->extern_desc->extern_desc.func
+                                            .type_idx]
+                                ->type_specific.function;
+                        inst_type_instance->func_count++;
+                        inst_type_instance
+                            ->exports[inst_type_instance->exports_count]
+                            .exp.func_type =
+                            inst_type_instance
+                                ->funcs[inst_type_instance->func_count];
+                        inst_type_instance->exports_count++;
+                        break;
+                    default:
+                        set_error_buf_ex(
+                            error_buf, error_buf_size,
+                            "Only type and function exports are supported in "
+                            "instance type declaration for now\n");
+                        break;
+                }
+                break;
+            default:
+                set_error_buf_ex(
+                    error_buf, error_buf_size,
+                    "Unsupported Component instance declaration type\n");
+                break;
+        }
+    }
+    types[*types_count] = curr_type;
+    (*types_count)++;
+    return size;
+}
+
+bool
+wasm_resolve_types(WASMComponentTypeSection *type_section,
+                   WASMComponentInstance *comp_instance, char *error_buf,
+                   uint32 error_buf_size)
+{
+    uint32 idx = 0, size = 0;
+    WASMComponentTypes *type = NULL;
+    if (!type_section || !comp_instance) {
+        set_error_buf_ex(error_buf, error_buf_size,
+                         "ERROR: Invalid section or component instance\n");
+        return false;
+    }
+
+    for (idx = 0; idx < type_section->count; idx++) {
+        type = &type_section->types[idx];
+        size = 0;
+        switch (type->tag) {
+            case WASM_COMP_DEF_TYPE:
+                size += fill_def_type_instance(
+                    comp_instance->types, &comp_instance->types_count,
+                    comp_instance->defined_types,
+                    comp_instance->defined_types_size, type, error_buf,
+                    error_buf_size);
+                break;
+            case WASM_COMP_FUNC_TYPE:
+                size += fill_func_type_instance(
+                    comp_instance->types, &comp_instance->types_count,
+                    comp_instance->defined_types,
+                    comp_instance->defined_types_size, type, error_buf,
+                    error_buf_size);
+                break;
+            case WASM_COMP_COMPONENT_TYPE:
+                // TODO: No example found
+                LOG_WARNING("TODO: Component type not relevant for now, no "
+                            "examples found\n");
+                break;
+            case WASM_COMP_INSTANCE_TYPE:
+                size += fill_instance_type_instance(
+                    comp_instance->types, &comp_instance->types_count,
+                    comp_instance->defined_types,
+                    comp_instance->defined_types_size, type, comp_instance,
+                    error_buf, error_buf_size);
+                break;
+            case WASM_COMP_RESOURCE_TYPE_SYNC:
+                size += fill_resource_type_instance(
+                    comp_instance->types, &comp_instance->types_count,
+                    comp_instance->defined_types,
+                    comp_instance->defined_types_size, type, comp_instance,
+                    error_buf, error_buf_size);
+                break;
+            case WASM_COMP_RESOURCE_TYPE_ASYNC:
+            case WASM_COMP_INVALID_TYPE:
+            default:
+                break;
+        }
+        // TODO: error handling for fill instance failure, component type not
+        // taken into account for now
+        if (!size && type->tag != WASM_COMP_COMPONENT_TYPE) {
+            set_error_buf_ex(error_buf, error_buf_size, "Returned size is 0\n");
+            return false;
+        }
+        comp_instance->defined_types_size -= size;
+        comp_instance->defined_types =
+            (void *)((uint8_t *)comp_instance->defined_types + size);
+    }
+    return true;
 }

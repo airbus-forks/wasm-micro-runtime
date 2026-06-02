@@ -4,6 +4,7 @@
  */
 
 #include "wasm_component.h"
+#include "wasm_component_runtime.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -378,4 +379,318 @@ wasm_component_free_instances_section(WASMComponentSection *section)
     }
     wasm_runtime_free(instance_sec);
     section->parsed.instance_section = NULL;
+}
+
+bool
+wasm_resolve_instance(struct WASMComponentInstSection *instance_section,
+                      WASMComponentInstance *comp_instance, char *error_buf,
+                      uint32 error_buf_size)
+{
+    uint32 idx = 0, arg_idx = 0;
+    WASMComponentInst *instance = NULL;
+    WASMComponent *target = NULL;
+    WASMComponentInstArg *arg = NULL;
+    for (idx = 0; idx < instance_section->count; idx++) {
+        instance = &instance_section->instances[idx];
+        if (instance->instance_expression_tag
+            == WASM_COMP_INSTANCE_EXPRESSION_WITH_ARGS) {
+            if (instance->expression.with_args.idx
+                > comp_instance->components_count) {
+                set_error_buf_ex(
+                    error_buf, error_buf_size,
+                    "Component index exceeded, component %d not yet defined\n",
+                    instance->expression.with_args.idx);
+                return false;
+            }
+            target =
+                comp_instance->components[instance->expression.with_args.idx];
+            WASMComponentInstArgInstances instance_expression;
+            instance_expression.parent = comp_instance;
+            instance_expression.arg_len =
+                instance->expression.with_args.arg_len;
+            instance_expression.args = NULL;
+            bool inst_ok = true;
+
+            if (instance_expression.arg_len) {
+                instance_expression.args =
+                    (WASMComponentInstArgInstance *)wasm_runtime_malloc(
+                        instance_expression.arg_len
+                        * sizeof(WASMComponentInstArgInstance));
+                if (!instance_expression.args) {
+                    set_error_buf_ex(
+                        error_buf, error_buf_size,
+                        "ERROR: Failed to allocate instance expression args");
+                    goto fail_inst;
+                }
+            }
+
+            for (arg_idx = 0; arg_idx < instance->expression.with_args.arg_len;
+                 arg_idx++) {
+                arg = &instance->expression.with_args.args[arg_idx];
+                instance_expression.args[arg_idx].name = arg->name;
+                instance_expression.args[arg_idx].sort_idx = arg->idx.sort_idx;
+
+                switch (arg->idx.sort_idx->sort->sort) {
+                    case WASM_COMP_SORT_CORE_SORT:
+                        if (arg->idx.sort_idx->sort->core_sort != 0x11) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: The only allowed core sort is core "
+                                "module, sort %d not allowed",
+                                arg->idx.sort_idx->sort->core_sort);
+                            goto fail_inst;
+                        }
+                        if (arg->idx.sort_idx->idx
+                            > comp_instance->core_modules_count) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Core module %d not yet defined",
+                                arg->idx.sort_idx->idx);
+                            goto fail_inst;
+                        }
+                        LOG_DEBUG("Added core module expression argument");
+                        instance_expression.args[arg_idx].arg.core_module =
+                            comp_instance->core_modules[arg->idx.sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_FUNC:
+                        if (arg->idx.sort_idx->idx
+                            > comp_instance->functions_count) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Function %d not yet defined",
+                                arg->idx.sort_idx->idx);
+                            goto fail_inst;
+                        }
+                        instance_expression.args[arg_idx].arg.function =
+                            comp_instance->functions[arg->idx.sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_VALUE:
+                        if (arg->idx.sort_idx->idx
+                            > comp_instance->values_count) {
+                            set_error_buf_ex(error_buf, error_buf_size,
+                                             "ERROR: Value %d not yet defined",
+                                             arg->idx.sort_idx->idx);
+                            goto fail_inst;
+                        }
+                        instance_expression.args[arg_idx].arg.value =
+                            comp_instance->values[arg->idx.sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_TYPE:
+                        if (arg->idx.sort_idx->idx
+                            > comp_instance->types_count) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Function %d not yet defined",
+                                arg->idx.sort_idx->idx);
+                            goto fail_inst;
+                        }
+                        instance_expression.args[arg_idx].arg.type =
+                            comp_instance->types[arg->idx.sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_COMPONENT:
+                        if (arg->idx.sort_idx->idx
+                            > comp_instance->components_count) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Components %d not yet defined",
+                                arg->idx.sort_idx->idx);
+                            goto fail_inst;
+                        }
+                        instance_expression.args[arg_idx].arg.component =
+                            comp_instance->components[arg->idx.sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_INSTANCE:
+                        if (arg->idx.sort_idx->idx
+                            > comp_instance->component_instances_count) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Component instance %d not yet defined",
+                                arg->idx.sort_idx->idx);
+                            goto fail_inst;
+                        }
+                        instance_expression.args[arg_idx].arg.instance =
+                            comp_instance
+                                ->component_instances[arg->idx.sort_idx->idx];
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            WASMComponentInstance *new_inst =
+                wasm_component_instantiate_internal(
+                    target, &instance_expression, error_buf, error_buf_size);
+            if (!new_inst) {
+                set_error_buf_ex(
+                    error_buf, error_buf_size,
+                    "ERROR: Instantiation %d of inner component %d failed\n",
+                    comp_instance->component_instances_count,
+                    instance->expression.with_args.idx);
+                goto fail_inst;
+            }
+            comp_instance->component_instances
+                [comp_instance->component_instances_count] = new_inst;
+            comp_instance->component_instances_count++;
+            comp_instance
+                ->defined_instances[comp_instance->defined_instances_count] =
+                new_inst;
+            comp_instance->defined_instances_count++;
+            goto done_inst;
+        fail_inst:
+            inst_ok = false;
+        done_inst:
+            if (instance_expression.args) wasm_runtime_free(instance_expression.args);
+            instance_expression.args = NULL;
+            if (!inst_ok)
+                return false;
+        }
+        else if (instance->instance_expression_tag
+                 == WASM_COMP_INSTANCE_EXPRESSION_WITHOUT_ARGS) {
+            WASMComponentIndexCount index_count = { 0 };
+            WASMComponentInlineExport *inst_expression = NULL;
+            for (idx = 0;
+                 idx < instance->expression.without_args.inline_expr_len;
+                 idx++) {
+                inst_expression =
+                    &instance->expression.without_args.inline_expr[idx];
+                switch (inst_expression->sort_idx->sort->sort) {
+                    case WASM_COMP_SORT_CORE_SORT:
+                        if (inst_expression->sort_idx->sort->core_sort
+                            != 0x11) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: The only allowed core sort is core "
+                                "module, sort %d not allowed",
+                                inst_expression->sort_idx->sort->core_sort);
+                            return false;
+                        }
+                        break;
+                    case WASM_COMP_SORT_FUNC:
+                        index_count.functions++;
+                        break;
+                    case WASM_COMP_SORT_VALUE:
+                        index_count.values++;
+                        break;
+                    case WASM_COMP_SORT_TYPE:
+                        index_count.types++;
+                        break;
+                    case WASM_COMP_SORT_COMPONENT:
+                        index_count.components++;
+                        break;
+                    case WASM_COMP_SORT_INSTANCE:
+                        index_count.instances++;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            WASMComponentInstance *new_inst = wasm_component_instance_allocate(
+                &index_count, error_buf, error_buf_size);
+            new_inst->parent = comp_instance;
+
+            for (idx = 0;
+                 idx < instance->expression.without_args.inline_expr_len;
+                 idx++) {
+                inst_expression =
+                    &instance->expression.without_args.inline_expr[idx];
+
+                WASMComponentExportInstance *inline_export =
+                    &new_inst->exports[new_inst->exports_count];
+                inline_export->export_name->exported.simple.name =
+                    inst_expression->name;
+                inline_export->export_name->tag =
+                    strstr(inst_expression->name->name, "@")
+                        ? WASM_COMP_IMPORTNAME_VERSIONED
+                        : WASM_COMP_IMPORTNAME_SIMPLE;
+                inline_export->type = inst_expression->sort_idx->sort->sort;
+
+                // Validation requires any exported sortidx to have a valid
+                // externdesc (which disallows core sorts other than core
+                // module)
+                switch (inst_expression->sort_idx->sort->sort) {
+                    case WASM_COMP_SORT_CORE_SORT:
+                        if (inst_expression->sort_idx->sort->core_sort
+                            != 0x11) {
+                            set_error_buf_ex(
+                                error_buf, error_buf_size,
+                                "ERROR: Export definition only suport module "
+                                "core sort, sort %d not supported",
+                                inst_expression->sort_idx->sort->core_sort);
+                            free(new_inst);
+                            return false;
+                        }
+                        new_inst->core_modules[new_inst->core_modules_count] =
+                            comp_instance
+                                ->core_modules[inst_expression->sort_idx->idx];
+                        new_inst->core_modules_count++;
+                        inline_export->exp.core_module =
+                            comp_instance
+                                ->core_modules[inst_expression->sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_FUNC:
+                        new_inst->functions[new_inst->functions_count] =
+                            comp_instance
+                                ->functions[inst_expression->sort_idx->idx];
+                        new_inst->functions_count++;
+                        inline_export->exp.function =
+                            comp_instance
+                                ->functions[inst_expression->sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_VALUE:
+                        new_inst->values[new_inst->values_count] =
+                            comp_instance
+                                ->values[inst_expression->sort_idx->idx];
+                        new_inst->values_count++;
+                        inline_export->exp.value =
+                            comp_instance
+                                ->values[inst_expression->sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_TYPE:
+                        new_inst->types[new_inst->types_count] =
+                            comp_instance
+                                ->types[inst_expression->sort_idx->idx];
+                        new_inst->types_count++;
+                        inline_export->exp.type =
+                            comp_instance
+                                ->types[inst_expression->sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_COMPONENT:
+                        new_inst->components[new_inst->components_count] =
+                            comp_instance
+                                ->components[inst_expression->sort_idx->idx];
+                        new_inst->components_count++;
+                        inline_export->exp.component =
+                            comp_instance
+                                ->components[inst_expression->sort_idx->idx];
+                        break;
+                    case WASM_COMP_SORT_INSTANCE:
+                        new_inst->component_instances
+                            [new_inst->component_instances_count] =
+                            comp_instance->component_instances
+                                [inst_expression->sort_idx->idx];
+                        new_inst->component_instances_count++;
+                        inline_export->exp.instance =
+                            comp_instance->component_instances
+                                [inst_expression->sort_idx->idx];
+                        break;
+                    default:
+                        break;
+                }
+                new_inst->exports_count++;
+            }
+            comp_instance->component_instances
+                [comp_instance->component_instances_count] = new_inst;
+            comp_instance
+                ->defined_instances[comp_instance->defined_instances_count] =
+                new_inst;
+            comp_instance->defined_instances_count++;
+        }
+        else {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "Instance expression type <%d> not supported\n",
+                             instance->instance_expression_tag);
+            return false;
+        }
+    }
+    return true;
 }
