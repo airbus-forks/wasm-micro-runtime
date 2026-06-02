@@ -79,6 +79,11 @@ if (NOT DEFINED WAMR_BUILD_LIBC_WASI)
   set (WAMR_BUILD_LIBC_WASI 1)
 endif ()
 
+if (NOT DEFINED WAMR_BUILD_COMPONENT_MODEL)
+  # Enable Component Model by default
+  set (WAMR_BUILD_COMPONENT_MODEL 1)
+endif ()
+
 if (NOT DEFINED WAMR_BUILD_FAST_INTERP)
   # Enable fast interpreter
   set (WAMR_BUILD_FAST_INTERP 1)
@@ -130,6 +135,12 @@ if (NOT WIN32)
   # Remove the extra spaces for better make log
   string (REGEX REPLACE "  *" " " CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
 endif()
+
+if (WAMR_BUILD_TARGET MATCHES "X86_.*" OR WAMR_BUILD_TARGET STREQUAL "AMD_64")
+  if (NOT (CMAKE_C_COMPILER MATCHES ".*clang.*" OR CMAKE_C_COMPILER_ID MATCHES ".*Clang"))
+    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mindirect-branch-register")
+  endif ()
+endif ()
 
 # The following flags are to enhance security, but it may impact performance,
 # we disable them by default.
