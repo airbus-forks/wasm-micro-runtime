@@ -41,7 +41,14 @@ print_help(void)
     printf("Usage: iwasm [-options] wasm_file [args...]\n");
     printf("options:\n");
     printf("  -f|--function name       Specify a function name of the module to run rather\n"
-           "                           than main\n");
+           "                           than main. Mutually exclusive with\n"
+           "                           -i|--invoke\n");
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+        printf("  -i|--invoke \n"
+           "  \"<function name>(args)\"  Specify a function name with arguments of the\n"
+           "                           component to execute. Mutually exclusive with\n"
+           "                           -f|--function\n");
+#endif
 #if WASM_ENABLE_LOG != 0
     printf("  -v=n                     Set log verbose level (0 to 5, default is 2) larger\n"
            "                           level with more log\n");
@@ -160,9 +167,9 @@ app_component_instance_main(WASMComponentInstance *comp_inst)
 }
 
 static const void *
-app_component_instance_func(WASMComponentInstance *comp_inst, const char *func_name)
+app_component_instance_func(WASMComponentInstance *comp_inst)
 {
-    wasm_component_application_execute_func(comp_inst, func_name, app_argc - 1, app_argv + 1);
+    wasm_component_application_execute_func(comp_inst, *(app_argv - 1));
     /* The result of wasm function or exception info was output inside
        wasm_component_application_execute_func(), here we don't output them
        again. */
@@ -274,19 +281,13 @@ app_component_instance_repl(WASMComponentInstance component_inst)
             printf("exit repl mode\n");
             break;
         }
-        app_argv = split_string(cmd, &app_argc, " ");
-        if (app_argv == NULL) {
-            LOG_ERROR("Wasm prepare param failed: split string failed.\n");
-            break;
-        }
-        if (app_argc != 0) {
+        {
             const char *exception;
-            wasm_component_application_execute_func(&component_inst, app_argv[0],
-                                                    app_argc - 1, app_argv + 1);
-            if ((exception = wasm_component_runtime_get_exception(&component_inst)))
+            wasm_component_application_execute_func(&component_inst, cmd);
+            if ((exception =
+                     wasm_component_runtime_get_exception(&component_inst)))
                 printf("%s\n", exception);
         }
-        free(app_argv);
     }
     free(cmd);
     return NULL;
@@ -821,8 +822,8 @@ execute_wasm_module(uint8 *wasm_file_buf, uint32 wasm_file_size,
 static bool
 execute_wasm_component(uint8 *wasm_file_buf, uint32 wasm_file_size,
                        uint32 stack_size, uint32 heap_size, bool is_repl_mode,
-                       const char *func_name,
-                       char *error_buf, uint32 error_buf_size, int32 *ret_value,
+                       bool is_component_func_invoke, char *error_buf,
+                       uint32 error_buf_size, int32 *ret_value,
                        WASMComponent *component_out,
                        WASMComponentInstance **component_inst_out
 #if WASM_ENABLE_LIBC_WASI != 0
@@ -888,8 +889,8 @@ execute_wasm_component(uint8 *wasm_file_buf, uint32 wasm_file_size,
         LOG_DEBUG("Executing in REPL mode\n");
         app_component_instance_repl(*component_inst);
     }
-    else if (func_name) {
-        exception = app_component_instance_func(component_inst, func_name);
+    else if (is_component_func_invoke) {
+        exception = app_component_instance_func(component_inst);
         if (exception) {
             *ret_value = 1;
         }
@@ -949,7 +950,9 @@ main(int argc, char *argv[])
     WASMComponent component;
     WASMComponentInstance *component_inst = NULL;
     bool component_loaded = false;
+    bool component_func_invoke = false; // 'true' if component function is invoked
 #endif
+    bool module_func_invoke = false; // 'true' if module function is invoked
     RunningMode running_mode = 0;
     RuntimeInitArgs init_args;
     char error_buf[128] = { 0 };
@@ -996,7 +999,17 @@ main(int argc, char *argv[])
                 return print_help();
             }
             func_name = argv[0];
+            module_func_invoke = true;
         }
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+        else if (!strcmp(argv[0], "-i") || !strcmp(argv[0], "--invoke")) {
+            argc--, argv++;
+            if (argc < 1) {
+                return print_help();
+            }
+            component_func_invoke = true;
+        }
+#endif
 #if WASM_ENABLE_INTERP != 0
         else if (!strcmp(argv[0], "--interp")) {
             running_mode = Mode_Interp;
@@ -1174,21 +1187,6 @@ main(int argc, char *argv[])
             wasm_proposal_print_status();
             return 0;
         }
-#if WASM_ENABLE_LIBC_WASI != 0 && WASM_ENABLE_COMPONENT_MODEL != 0
-        else if (!strcmp(argv[0], "-S")) {
-            argc--, argv++;
-            libc_wasi_parse_result_t result =
-                libc_wasi_parse_options(argv[0], &wasi_parse_ctx);
-            switch (result) {
-                case LIBC_WASI_PARSE_RESULT_OK:
-                    continue;
-                case LIBC_WASI_PARSE_RESULT_NEED_HELP:
-                    return print_help();
-                case LIBC_WASI_PARSE_RESULT_BAD_PARAM:
-                    return 1;
-            }
-        }
-#endif
         else {
 #if WASM_ENABLE_LIBC_WASI != 0
             libc_wasi_parse_result_t result =
@@ -1209,6 +1207,10 @@ main(int argc, char *argv[])
 
     if (argc == 0)
         return print_help();
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+    if (module_func_invoke && component_func_invoke)
+        return print_help();
+#endif
     wasm_file = argv[0];
     app_argc = argc;
     app_argv = argv;
@@ -1325,24 +1327,35 @@ main(int argc, char *argv[])
 
 #if WASM_ENABLE_COMPONENT_MODEL != 0
     if (is_wasm_component(header)) {
+        if (module_func_invoke) {
+            ret = print_help();
+            goto fail2;
+        }
         LOG_DEBUG("Detected WASM Component (Preview 2)\n");
         LOG_DEBUG("Executing WASM Component...\n");
         set_component_runtime(true);
-        if (!execute_wasm_component(wasm_file_buf, wasm_file_size, stack_size,
-                                   heap_size, is_repl_mode, func_name,
-                                   error_buf, sizeof(error_buf), &ret,
-                                   &component, &component_inst
+        if (!execute_wasm_component(
+                wasm_file_buf, wasm_file_size, stack_size, heap_size,
+                is_repl_mode, component_func_invoke, error_buf,
+                sizeof(error_buf), &ret, &component, &component_inst
 #if WASM_ENABLE_LIBC_WASI != 0
-                                   , &wasi_parse_ctx
+                ,
+                &wasi_parse_ctx
 #endif
-                                   )) {
+                )) {
             goto fail2;
         }
         component_loaded = true;
     }
     else
 #endif
-    if (is_wasm_module(header)) {
+        if (is_wasm_module(header)) {
+#if WASM_ENABLE_COMPONENT_MODEL != 0
+        if (component_func_invoke) {
+            ret = print_help();
+            goto fail2;
+        }
+#endif
         LOG_DEBUG("Detected WASM Module (Preview 1)\n");
         LOG_DEBUG("Executing WASM Module...\n");
 

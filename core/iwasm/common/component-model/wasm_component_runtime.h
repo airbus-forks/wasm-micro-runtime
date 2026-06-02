@@ -553,14 +553,10 @@ bool
 wasm_component_application_execute_main(WASMComponentInstance *, int32 argc,
                                         char *argv[]);
 bool
-wasm_component_application_execute_func(WASMComponentInstance *,
-                                        const char *name, int32 argc,
-                                        char *argv[]);
+wasm_component_application_execute_func(WASMComponentInstance *, char *argv);
 bool
-wasm_component_application_execute_func_ex(WASMComponentInstance *,
-                                           const char *name, int32 argc,
-                                           char *argv[], uint32 *argc1,
-                                           uint32 **argv1);
+wasm_component_application_execute_func_ex(WASMComponentInstance *, char *argv,
+                                           uint32 *argc1, uint32 **argv1);
 
 uint32_t
 align_to(uint32_t ptr, uint32_t alignment);

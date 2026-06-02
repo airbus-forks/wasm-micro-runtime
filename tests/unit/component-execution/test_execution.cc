@@ -51,8 +51,7 @@ TEST_F(ComponentExecutionTest, TestAddWASM)
     uint32 *argv1 = (uint32 *)wasm_runtime_malloc(sizeof(uint32) * 10);
     ASSERT_TRUE(argv1 != NULL);
 
-    char *args[] = { (char *)"3", (char *)"4" };
-    ret = wasm_component_application_execute_func_ex(this->helper->component_inst, "add", 2, args, &argc1, &argv1);
+    ret = wasm_component_application_execute_func_ex(this->helper->component_inst, (char*)"add(3,4)", &argc1, &argv1);
 
     // Check results
     bool function_succeeded = ret && !wasm_component_runtime_get_exception(this->helper->component_inst);
@@ -92,8 +91,7 @@ TEST_F(ComponentExecutionTest, TestCallNonExistentFunction)
     ASSERT_TRUE(argv1 != NULL);
 
     // Call non-existent function
-    char *args[] = { (char *)"3", (char *)"4" };
-    ret = wasm_component_application_execute_func_ex(this->helper->component_inst, "random_func", 2, args, &argc1, &argv1);
+    ret = wasm_component_application_execute_func_ex(this->helper->component_inst, (char*)"random_func(3,4)", &argc1, &argv1);
 
     // Should fail
     ASSERT_FALSE(ret);
@@ -107,7 +105,7 @@ TEST_F(ComponentExecutionTest, TestCallNonExistentFunction)
     wasm_runtime_free(argv1);
 }
 
-// Call with wrong parameter types/count
+// Call with wrong parameter count
 TEST_F(ComponentExecutionTest, TestCallWithWrongParameterCount)
 {
     helper->reset_component();
@@ -125,9 +123,8 @@ TEST_F(ComponentExecutionTest, TestCallWithWrongParameterCount)
     ASSERT_TRUE(argv1 != NULL);
 
     // add function expects 2 parameters, but provide 3
-    char *args[] = { (char *)"3", (char *)"4", (char *)"5" };
     ret = wasm_component_application_execute_func_ex(
-        this->helper->component_inst, "add", 3, args, &argc1, &argv1);
+        this->helper->component_inst, (char *)"add(3,4,5)", &argc1, &argv1);
 
     // Should fail
     ASSERT_FALSE(ret);
@@ -135,7 +132,7 @@ TEST_F(ComponentExecutionTest, TestCallWithWrongParameterCount)
     // Should have exception message about argument count
     const char* exception = wasm_component_runtime_get_exception(this->helper->component_inst);
     ASSERT_TRUE(exception != NULL);
-    ASSERT_TRUE(strstr(exception, "invalid input argument count") != NULL);
+    ASSERT_TRUE(strstr(exception, "This method waited 2 arguments, but received 3\n") != NULL);
 
     // Cleanup
     wasm_runtime_free(argv1);
@@ -158,8 +155,7 @@ TEST_F(ComponentExecutionTest, TestIntDivideByZeroTrap)
     ASSERT_TRUE(argv1 != NULL);
 
     // Call div with divisor = 0
-    char *args[] = { (char *)"10", (char *)"0" };
-    ret = wasm_component_application_execute_func_ex(this->helper->component_inst, "div", 2, args, &argc1, &argv1);
+    ret = wasm_component_application_execute_func_ex(this->helper->component_inst, (char *)"div(10, 0)", &argc1, &argv1);
 
     // Should fail due to trap
     ASSERT_FALSE(ret);
@@ -191,8 +187,7 @@ TEST_F(ComponentExecutionTest, TestFloatDivideByZeroReturnsInfinity)
     ASSERT_TRUE(argv1 != NULL);
 
     // Call fdiv with divisor = 0.0
-    char *args[] = { (char *)"10.0", (char *)"0.0" };
-    ret = wasm_component_application_execute_func_ex(this->helper->component_inst, "fdiv", 2, args, &argc1, &argv1);
+    ret = wasm_component_application_execute_func_ex(this->helper->component_inst, (char *)"fdiv(10.0, 0.0)", &argc1, &argv1);
 
     // Should succeed (no trap for float division by zero)
     bool function_succeeded = ret && !wasm_component_runtime_get_exception(this->helper->component_inst);

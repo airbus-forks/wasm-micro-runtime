@@ -267,3 +267,49 @@ component-model/
   wasm_component_task.h                  # Defining the concept of task and subtask
   wasm_component_task.c                  # Implementing concept of task and subtask
 ```
+# WAVE Parser Support
+
+## Introduction
+
+The WebAssembly Value Encoding (WAVE) is a human-readable text format designed to represent values that flow across the boundaries of WebAssembly components. While the [Component Model](https://component-model.bytecodealliance.org/) defines the binary representation and the Canonical ABI defines the memory translation, WAVE provides a standardized way to express these complex types (such as records, variants, lists, and tuples) in a text-based format.
+
+WAMR implements a dedicated WAVE parser to facilitate command-line invocations and testing. The parser bridges the gap between raw string inputs (e.g., `circle-area({x:0.0, y:0.0}, {x:2.0, y:0.0})`) and the strict, strongly-typed internal `wit_value_t` structures required by WAMR's Canonical ABI lifting and lowering mechanisms.
+
+## Parsing overview
+
+The WAVE parsing pipeline takes a raw string and produces a fully validated, strongly-typed argument list ready for component invocation. The diagram below illustrates the high-level parsing flow:
+
+
+The parsing process is divided into two distinct phases:
+
+1. **Syntactic Parsing**: The input string is tokenized by a Lex scanner and evaluated by a Bison grammar. This phase produces an untyped Abstract Syntax Tree (AST) wrapped in a structure. At this stage, all numbers are treated generically (e.g., all integers as `S64`, all floats as `F64`), and field types are not yet validated against any component schema.
+2. **Type Coercion (Adapter)**: The adapter takes the untyped AST and a target schema(parameter list) extracted from the loaded Wasm component. It recursively traverses the AST, verifying field names, list lengths, and tuple sizes, while coercing generic primitives into the exact types demanded by the component (e.g., downcasting `S64` to `S16` or `U8`).
+
+### Coercion Rules
+
+The component binary format supports a wide variety of types. The WAVE adapter handles the translation from text-parsed generic values to specific Canonical ABI values:
+
+| WAVE Text Input | Initial AST Type | Target Component Type | Coercion Action |
+|-----------------|------------------|-----------------------|-----------------|
+| `42` | `S64` | `U8`, `S16`, `U32`, etc. | Safe downcast (value truncated to target width). |
+| `3.14` | `F64` | `F32` | Precision downcast to 32-bit float. |
+| `[1, 2, 3]` | `LIST` | `LIST` of `S32` | Recursively coerces each element in the list. |
+| `{x: 1, y: 2}` | `RECORD` | `RECORD` | Matches field labels by name (`strcmp`). Rejects missing or extra fields. Order independent. |
+| `(1, "test")` | `TUPLE` | `TUPLE` | Matches elements by index. Rejects size mismatches. |
+
+## Execution Model: AST to Canonical ABI
+
+Unlike raw core WebAssembly where arguments are simple integers and floats passed on a stack, Component Model arguments require complex memory allocations (e.g., allocating string buffers or nested record structures in linear memory).
+
+The WAVE parser acts as the data provider for the Canonical ABI's `(Function Wrappers)`. 
+
+1. **Parse**: Generates the intermediate AST structure.
+2. **Schema Resolution**: The runtime looks up the exported function name in the component's index space to retrieve the the expected parameters.
+3. **Coerce**: Strictly validate the types.
+4. **Lower**: The resulting structure list is converted to it's core representation, afterwards being written in the core module's linear memory.
+5. **Execute**: The core WebAssembly function is invoked.
+6. **Cleanup**: Safely frees all dynamically allocated memory associated with the AST and parsed strings.
+
+## Source layout
+
+All WAVE parser sources reside in `core/iwasm/common/component-model/wave-parser/`

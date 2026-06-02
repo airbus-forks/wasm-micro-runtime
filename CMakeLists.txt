@@ -142,6 +142,19 @@ if (WAMR_BUILD_TARGET MATCHES "X86_.*" OR WAMR_BUILD_TARGET STREQUAL "AMD_64")
   endif ()
 endif ()
 
+
+set(WAVE_PARSER_DIR ${WAMR_ROOT_DIR}/core/iwasm/common/wave-parser)
+
+if (EXISTS "${WAVE_PARSER_DIR}/wave_parser.cmake")
+    message(STATUS "WAMR: Including Wave Parser module via script...")
+    
+    include(${WAVE_PARSER_DIR}/wave_parser.cmake)
+    
+    list(APPEND WAMR_RUNTIME_LIB_SOURCE ${WAVE_PARSER_SOURCES})
+    
+    include_directories(${WAVE_PARSER_INCLUDE_DIRS})
+endif()
+
 # The following flags are to enhance security, but it may impact performance,
 # we disable them by default.
 #if (WAMR_BUILD_TARGET MATCHES "X86_.*" OR WAMR_BUILD_TARGET STREQUAL "AMD_64")
@@ -156,6 +169,22 @@ set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 add_library (vmlib ${WAMR_RUNTIME_LIB_SOURCE})
+
+if (EXISTS "${WAVE_PARSER_DIR}/wave_test_main.c")
+    message(STATUS "WAMR: Building wave_parser_test...")
+    add_executable(wave_parser_test 
+        ${WAVE_PARSER_DIR}/wave_test_main.c
+    )
+    
+    target_link_libraries(wave_parser_test PRIVATE vmlib)
+    
+    target_include_directories(wave_parser_test PRIVATE 
+        ${WAVE_PARSER_INCLUDE_DIRS}
+        ${WAMR_ROOT_DIR}/core/iwasm/include
+        ${WAMR_ROOT_DIR}/core/iwasm/common
+    )
+endif()
+
 set_target_properties (vmlib PROPERTIES OUTPUT_NAME iwasm)
 target_include_directories(vmlib INTERFACE
   $<BUILD_INTERFACE:${WAMR_ROOT_DIR}/core/iwasm/include>

@@ -5,10 +5,14 @@
 
 #if WASM_ENABLE_COMPONENT_MODEL != 0
 #include "bh_platform.h"
+#include "bh_log.h"
 #include "wasm_component.h"
 #include "wasm_component_runtime.h"
 #include "wasm_ieee754.h"
 #include "wasm_component_flat.h"
+#include "../wave-parser/wave_adapter.h"
+#include "wasm_component_task.h"
+#include "wasm_export.h"
 
 static bool
 check_main_func_type(const WASMFuncType *type, bool is_memory64)
@@ -304,36 +308,143 @@ print_return_values(wit_value_t lifted_results)
 }
 
 static bool
-execute_component_func(WASMComponentInstance *component_inst, const char *name,
-                       int32 argc, char *argv[], uint32 *argc1, uint32 **argv1)
+execute_component_func(WASMComponentInstance *component_inst, char *argv,
+                       uint32 *argc1, uint32 **argv1)
 {
     if (!component_inst) {
         return false;
     }
 
-    if (!name) {
-        return false;
-    }
-
-    WASMComponentFunctionInstance *target_func;
+    WASMComponentFunctionInstance *target_func = NULL;
     WASMFuncType *type = NULL;
     WASMExecEnv *exec_env = NULL;
+    Subtask *subtask = NULL;
     uint32 cell_num = 0;
     uint32 argc1_val = 0;
     uint32 *argv1_val = NULL;
     bool argv1_allocated = false;
-    int32 i, p, module_type;
-    uint64 total_size;
+    int32 i = 0, p = 0, module_type = 0;
+    uint64 total_size = 0;
     char buf[128];
 
-    bh_assert(argc >= 0);
-    LOG_DEBUG("call a function \"%s\" with %d arguments", name, argc);
+    wave_invocation_t inv;
+    memset(&inv, 0, sizeof(wave_invocation_t));
 
-    target_func = wasm_component_lookup_function(component_inst, name);
-    if (!target_func) {
-        snprintf(buf, sizeof(buf), "lookup function %s failed", name);
+    if (!wave_pop_func_name(argv, &inv)) {
+        snprintf(buf, sizeof(buf), "Failed to extract function name");
         wasm_component_set_exception(component_inst, buf);
         goto fail;
+    }
+
+    target_func = wasm_component_lookup_function(component_inst, inv.func_name);
+    if (!target_func) {
+        snprintf(buf, sizeof(buf), "lookup function %s failed", inv.func_name);
+        wasm_component_set_exception(component_inst, buf);
+        goto fail;
+    }
+
+    if (!wave_parse_invocation_str(argv, &inv)) {
+        snprintf(buf, sizeof(buf),
+                 "Parsing component function definition failed");
+        wasm_component_set_exception(component_inst, buf);
+        goto fail;
+    }
+
+    if (inv.arg_count != target_func->func_type->params->count) {
+        snprintf(buf, sizeof(buf),
+                 "This method waited %d arguments, but received %d\n",
+                 target_func->func_type->params->count, inv.arg_count);
+        wasm_component_set_exception(component_inst, buf);
+        goto fail;
+    }
+
+    // Validating and coercing data values
+    if (!wave_coerce_invocation(component_inst, &inv,
+                                target_func->func_type->params)) {
+        snprintf(buf, sizeof(buf), "Type Error argument\n");
+        wasm_component_set_exception(component_inst, buf);
+        goto fail;
+    }
+
+    LOG_DEBUG("Executing WASM component function: %s with %d arguments\n",
+              inv.func_name);
+
+    CanonicalOptions *lower_opts = target_func->canon_options;
+    WASMComponentFuncTypeInstance *ft = target_func->func_type;
+    subtask = subtask_create();
+    if (!subtask) {
+        wasm_component_set_exception(component_inst,
+                                     "Failed to create subtask");
+        goto fail;
+    }
+
+    // Lower context
+    LiftLowerContext cx_lower;
+    cx_lower.canonical_opts = lower_opts;
+    cx_lower.inst = component_inst;
+    cx_lower.borrow_scope_type = BORROW_SCOPE_SUBTASK;
+    cx_lower.borrow_scope.subtask = subtask;
+
+    CoreValueList flat_args;
+    cvl_init(&flat_args);
+    if (!lower_flat_values(&cx_lower, MAX_FLAT_PARAMS, inv.args, ft->params,
+                           NULL, NULL, &flat_args)) {
+        wasm_component_set_exception(component_inst,
+                                     "component: failed to lower parameters");
+        goto fail;
+    }
+
+    // Check if flattening was successful
+    if (flat_args.count != target_func->core_func->param_count) {
+        wasm_component_set_exception(
+            component_inst,
+            "component: flatted params is different than core func params");
+        goto fail;
+    }
+
+    // Convert flat_args -> wasm_val_t[]
+    wasm_val_t wasm_args[MAX_FLAT_TYPES];
+    for (uint32_t arg_index = 0; arg_index < flat_args.count; arg_index++) {
+        switch (flat_args.values[arg_index].type) {
+            case CORE_TYPE_I32:
+            {
+                wasm_args[arg_index].kind = WASM_I32;
+                wasm_args[arg_index].of.i32 =
+                    (int32_t)flat_args.values[arg_index].val.i32;
+                break;
+            }
+
+            case CORE_TYPE_I64:
+            {
+                wasm_args[arg_index].kind = WASM_I64;
+                wasm_args[arg_index].of.i64 =
+                    (int64_t)flat_args.values[arg_index].val.i64;
+                break;
+            }
+
+            case CORE_TYPE_F32:
+            {
+                wasm_args[arg_index].kind = WASM_F32;
+                wasm_args[arg_index].of.f32 =
+                    flat_args.values[arg_index].val.f32;
+                break;
+            }
+
+            case CORE_TYPE_F64:
+            {
+                wasm_args[arg_index].kind = WASM_F64;
+                wasm_args[arg_index].of.f64 =
+                    flat_args.values[arg_index].val.f64;
+                break;
+            }
+
+            default:
+            {
+                wasm_component_set_exception(
+                    component_inst, "invalid core type in lowered params");
+                goto fail;
+            }
+        }
     }
 
     module_type = target_func->core_func->module_instance->module_type;
@@ -344,17 +455,12 @@ execute_component_func(WASMComponentInstance *component_inst, const char *name,
         return false;
     }
 
-    if (type->param_count != (uint32)argc) {
-        wasm_component_set_exception(component_inst,
-                                     "invalid input argument count");
-        goto fail;
-    }
-
     argc1_val = type->param_cell_num;
     cell_num =
         (argc1_val > type->ret_cell_num) ? argc1_val : type->ret_cell_num;
 
-    total_size = sizeof(uint32) * (uint64)(cell_num > 2 ? cell_num : 2);
+    total_size =
+        (uint64)(sizeof(uint32) * (uint64)(cell_num > 2 ? cell_num : 2));
 
     /* Check if caller provided a pre-allocated buffer */
     if (argv1 && *argv1) {
@@ -381,195 +487,14 @@ execute_component_func(WASMComponentInstance *component_inst, const char *name,
         goto fail;
     }
 
-    /* Parse arguments */
-    for (i = 0, p = 0; i < argc; i++) {
-        char *endptr = NULL;
-        bh_assert(argv[i] != NULL);
-        if (argv[i][0] == '\0') {
-            snprintf(buf, sizeof(buf), "invalid input argument %" PRId32, i);
-            wasm_component_set_exception(component_inst, buf);
-            goto fail;
-        }
-
-        switch (type->types[i]) {
-            case VALUE_TYPE_I32:
-            {
-                argv1_val[p++] = (uint32)strtoul(argv[i], &endptr, 0);
-                break;
-            }
-
-            case VALUE_TYPE_I64:
-            {
-                union {
-                    uint64 val;
-                    uint32 parts[2];
-                } u;
-                u.val = strtoull(argv[i], &endptr, 0);
-                argv1_val[p++] = u.parts[0];
-                argv1_val[p++] = u.parts[1];
-                break;
-            }
-
-            case VALUE_TYPE_F32:
-            {
-                float32 f32 = strtof(argv[i], &endptr);
-                if (isnan(f32)) {
-                    if (argv[i][0] == '-') {
-                        union ieee754_float u;
-                        u.f = f32;
-                        if (is_little_endian())
-                            u.ieee.ieee_little_endian.negative = 1;
-                        else
-                            u.ieee.ieee_big_endian.negative = 1;
-                        bh_memcpy_s(&f32, sizeof(float), &u.f, sizeof(float));
-                    }
-                    if (endptr[0] == ':') {
-                        uint32 sig;
-                        union ieee754_float u;
-                        sig = (uint32)strtoul(endptr + 1, &endptr, 0);
-                        u.f = f32;
-                        if (is_little_endian())
-                            u.ieee.ieee_little_endian.mantissa = sig;
-                        else
-                            u.ieee.ieee_big_endian.mantissa = sig;
-                        bh_memcpy_s(&f32, sizeof(float), &u.f, sizeof(float));
-                    }
-                }
-                bh_memcpy_s(&argv1_val[p], (uint32)total_size - p, &f32,
-                            (uint32)sizeof(float));
-                p++;
-                break;
-            }
-
-            case VALUE_TYPE_F64:
-            {
-                union {
-                    float64 val;
-                    uint32 parts[2];
-                } u;
-                u.val = strtod(argv[i], &endptr);
-                if (isnan(u.val)) {
-                    if (argv[i][0] == '-') {
-                        union ieee754_double ud;
-                        ud.d = u.val;
-                        if (is_little_endian())
-                            ud.ieee.ieee_little_endian.negative = 1;
-                        else
-                            ud.ieee.ieee_big_endian.negative = 1;
-                        bh_memcpy_s(&u.val, sizeof(double), &ud.d,
-                                    sizeof(double));
-                    }
-                    if (endptr && endptr[0] == ':') {
-                        uint64 sig;
-                        union ieee754_double ud;
-                        sig = strtoull(endptr + 1, &endptr, 0);
-                        ud.d = u.val;
-                        if (is_little_endian()) {
-                            ud.ieee.ieee_little_endian.mantissa0 = sig >> 32;
-                            ud.ieee.ieee_little_endian.mantissa1 = (uint32)sig;
-                        }
-                        else {
-                            ud.ieee.ieee_big_endian.mantissa0 = sig >> 32;
-                            ud.ieee.ieee_big_endian.mantissa1 = (uint32)sig;
-                        }
-                        bh_memcpy_s(&u.val, sizeof(double), &ud.d,
-                                    sizeof(double));
-                    }
-                }
-                argv1_val[p++] = u.parts[0];
-                argv1_val[p++] = u.parts[1];
-                break;
-            }
-
-            case VALUE_TYPE_FUNCREF:
-            case VALUE_TYPE_EXTERNREF:
-            {
-                if (strncasecmp(argv[i], "null", 4) == 0) {
-                    argv1_val[p++] = (uint32)-1;
-                }
-                else {
-                    argv1_val[p++] = (uint32)strtoul(argv[i], &endptr, 0);
-                }
-                break;
-            }
-
-            default:
-            {
-                bh_assert(0);
-                break;
-            }
-        }
-
-        if (endptr && *endptr != '\0' && *endptr != '_') {
-            snprintf(buf, sizeof(buf), "invalid input argument %" PRId32 ": %s",
-                     i, argv[i]);
-            wasm_component_set_exception(component_inst, buf);
-            goto fail;
-        }
-    }
-
     wasm_component_set_exception(component_inst, NULL);
-
-    /* Convert argv1_val cells to wasm_val_t array for wasm_runtime_call_wasm_a
-     */
-    wasm_val_t wasm_args[MAX_FLAT_TYPES];
-    for (i = 0, p = 0; i < argc; i++) {
-        switch (type->types[i]) {
-            case VALUE_TYPE_I32:
-            {
-                wasm_args[i].kind = WASM_I32;
-                wasm_args[i].of.i32 = (int32)argv1_val[p++];
-                break;
-            }
-
-            case VALUE_TYPE_I64:
-            {
-                union {
-                    uint64 val;
-                    uint32 parts[2];
-                } u;
-                u.parts[0] = argv1_val[p++];
-                u.parts[1] = argv1_val[p++];
-                wasm_args[i].kind = WASM_I64;
-                wasm_args[i].of.i64 = u.val;
-                break;
-            }
-
-            case VALUE_TYPE_F32:
-            {
-                wasm_args[i].kind = WASM_F32;
-                memcpy(&wasm_args[i].of.f32, &argv1_val[p++], sizeof(float));
-                break;
-            }
-
-            case VALUE_TYPE_F64:
-            {
-                union {
-                    float64 val;
-                    uint32 parts[2];
-                } u;
-                u.parts[0] = argv1_val[p++];
-                u.parts[1] = argv1_val[p++];
-                wasm_args[i].kind = WASM_F64;
-                wasm_args[i].of.f64 = u.val;
-                break;
-            }
-
-            default:
-            {
-                wasm_args[i].kind = WASM_I32;
-                wasm_args[i].of.i32 = (int32)argv1_val[p++];
-                break;
-            }
-        }
-    }
 
     uint32 num_results = type->result_count;
     wasm_val_t wasm_results[MAX_FLAT_TYPES];
 
     if (!wasm_runtime_call_wasm_a(
             exec_env, (WASMFunctionInstanceCommon *)target_func->core_func,
-            num_results, wasm_results, type->param_count, wasm_args)) {
+            num_results, wasm_results, flat_args.count, wasm_args)) {
         // Propagate exception from module instance to component instance
         const char *exception = wasm_runtime_get_exception(
             (WASMModuleInstanceCommon *)
@@ -638,7 +563,6 @@ execute_component_func(WASMComponentInstance *component_inst, const char *name,
 
     /* Lift results to WIT values */
     CanonicalOptions *lift_opts = target_func->canon_options;
-    WASMComponentFuncTypeInstance *ft = target_func->func_type;
 
     if (ft && ft->results) {
         LiftLowerContext cx_lift;
@@ -715,13 +639,17 @@ execute_component_func(WASMComponentInstance *component_inst, const char *name,
         wasm_runtime_free(argv1_val);
     }
 
+    wave_free_invocation_struct(&inv);
+    subtask_destroy(subtask);
     return true;
 
 fail:
+    subtask_destroy(subtask);
     /* Only free if we allocated it internally */
     if (argv1_allocated && argv1_val) {
         wasm_runtime_free(argv1_val);
     }
+    wave_free_invocation_struct(&inv);
     bh_assert(wasm_component_runtime_get_exception(component_inst));
     return false;
 }
@@ -890,11 +818,10 @@ wasm_component_application_execute_main(WASMComponentInstance *component_inst,
 
 bool
 wasm_component_application_execute_func(WASMComponentInstance *component_inst,
-                                        const char *name, int32 argc,
-                                        char *argv[])
+                                        char *argv)
 {
-    bool ret;
-    ret = execute_component_func(component_inst, name, argc, argv, NULL, NULL);
+    bool ret = false;
+    ret = execute_component_func(component_inst, argv, NULL, NULL);
     return (ret && !wasm_component_runtime_get_exception(component_inst))
                ? true
                : false;
@@ -902,14 +829,14 @@ wasm_component_application_execute_func(WASMComponentInstance *component_inst,
 
 bool
 wasm_component_application_execute_func_ex(
-    WASMComponentInstance *component_inst, const char *name, int32 argc,
-    char *argv[], uint32 *argc1, uint32 **argv1)
+    WASMComponentInstance *component_inst, char *argv, uint32 *argc1,
+    uint32 **argv1)
 {
-    bool ret;
-    ret =
-        execute_component_func(component_inst, name, argc, argv, argc1, argv1);
+    bool ret = false;
+    ret = execute_component_func(component_inst, argv, argc1, argv1);
     return (ret && !wasm_component_runtime_get_exception(component_inst))
                ? true
                : false;
 }
+
 #endif /* WASM_ENABLE_COMPONENT_MODEL != 0*/
