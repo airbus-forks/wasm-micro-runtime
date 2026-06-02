@@ -7,6 +7,7 @@
 #include "wasm_native.h"
 #include "wasi_p2_cli_wrapper.h"
 #include "wasi_p2_clocks_wrapper.h"
+#include "wasi_p2_filesystem_wrapper.h"
 #include "wasi_p2_random_wrapper.h"
 #include "wasi_p2_io_wrapper.h"
 #include "wasm_export.h"
@@ -126,6 +127,73 @@ static NativeSymbol clocks_wall_clock_symbols[] = {
     REG_WASI_P2_FUNCTION("now", wasi_wall_clock_now, "(i)"),
     REG_WASI_P2_FUNCTION("resolution", wasi_wall_clock_resolution, "(i)"),
 };
+
+static NativeSymbol filesystem_preopens_symbols[] = {
+    REG_WASI_P2_FUNCTION("get-directories", wasi_filesystem_get_directories,
+                         "(i)"),
+};
+
+static NativeSymbol filesystem_types_symbols[] = {
+    REG_WASI_P2_FUNCTION("[method]descriptor.read-via-stream",
+                         wasi_filesystem_read_via_stream, "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.write-via-stream",
+                         wasi_filesystem_write_via_stream, "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.append-via-stream",
+                         wasi_filesystem_append_via_stream, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.advise", wasi_filesystem_advise,
+                         "(iIIii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.sync-data",
+                         wasi_filesystem_sync_data, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.get-flags",
+                         wasi_filesystem_get_flags, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.get-type",
+                         wasi_filesystem_get_type, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.set-size",
+                         wasi_filesystem_set_size, "(iIi)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.set-times",
+                         wasi_filesystem_set_times, "(iiIiiIii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.read", wasi_filesystem_read,
+                         "(iIIi)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.write", wasi_filesystem_write,
+                         "(i*~Ii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.read-directory",
+                         wasi_filesystem_read_directory, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.sync", wasi_filesystem_sync,
+                         "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.create-directory-at",
+                         wasi_filesystem_create_directory_at, "(ii~i)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.stat", wasi_filesystem_stat,
+                         "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.stat-at", wasi_filesystem_stat_at,
+                         "(iii~i)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.set-times-at",
+                         wasi_filesystem_set_times_at, "(iii~iIiiIii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.link-at", wasi_filesystem_link_at,
+                         "(iii~ii~i)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.open-at", wasi_filesystem_open_at,
+                         "(iii~iii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.readlink-at",
+                         wasi_filesystem_readlink_at, "(ii~i)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.remove-directory-at",
+                         wasi_filesystem_remove_directory_at, "(ii~i)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.rename-at",
+                         wasi_filesystem_rename_at, "(ii~ii~i)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.symlink-at",
+                         wasi_filesystem_symlink_at, "(ii~i~i)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.unlink-file-at",
+                         wasi_filesystem_unlink_file_at, "(ii~i)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.is-same-object",
+                         wasi_filesystem_is_same_object, "(ii)i"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.metadata-hash",
+                         wasi_filesystem_metadata_hash, "(ii)"),
+    REG_WASI_P2_FUNCTION("[method]descriptor.metadata-hash-at",
+                         wasi_filesystem_metadata_hash_at, "(iii~i)"),
+    REG_WASI_P2_FUNCTION("[method]directory-entry-stream.read-directory-entry",
+                         wasi_filesystem_read_directory_entry, "(Ii)"),
+    REG_WASI_P2_FUNCTION("filesystem-error-code",
+                         wasi_filesystem_filesystem_error_code, "(ii)"),
+};
+
 static NativeSymbol random_random_symbols[] = {
     REG_WASI_P2_FUNCTION("get-random-bytes", wasi_random_get_random_bytes,
                          "(Ii)"),
@@ -203,6 +271,8 @@ static wasi_p2_module_t wasi_p2_modules[] = {
     WASI_P2_MODULE(cli_terminal_stderr, "cli/terminal-stderr", "0.2.0"),
     WASI_P2_MODULE(clocks_monotonic_clock, "clocks/monotonic-clock", "0.2.0"),
     WASI_P2_MODULE(clocks_wall_clock, "clocks/wall-clock", "0.2.0"),
+    WASI_P2_MODULE(filesystem_preopens, "filesystem/preopens", "0.2.0"),
+    WASI_P2_MODULE(filesystem_types, "filesystem/types", "0.2.0"),
     WASI_P2_MODULE(random_random, "random/random", "0.2.0"),
     WASI_P2_MODULE(random_insecure, "random/insecure", "0.2.0"),
     WASI_P2_MODULE(random_insecure_seed, "random/insecure-seed", "0.2.0"),
