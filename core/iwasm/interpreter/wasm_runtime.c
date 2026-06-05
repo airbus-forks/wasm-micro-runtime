@@ -2564,6 +2564,8 @@ wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
     module_inst->module = module;
     module_inst->e =
         (WASMModuleInstanceExtra *)((uint8 *)module_inst + extra_info_offset);
+    wasm_runtime_set_custom_data_internal(
+        (WASMModuleInstanceCommon *)module_inst, args->custom_data);
 #if WASM_ENABLE_THREAD_MGR != 0
     if (os_mutex_init(&module_inst->e->common.exception_lock) != 0) {
         wasm_runtime_free(module_inst);
@@ -4272,6 +4274,17 @@ wasm_get_module_mem_consumption(const WASMModule *module,
         }
     }
 
+#if WASM_ENABLE_LOAD_CUSTOM_SECTION != 0
+    {
+        WASMCustomSection *section = module->custom_section_list;
+        while (section) {
+            mem_conspn->custom_sections_size +=
+                sizeof(WASMCustomSection) + section->content_len;
+            section = section->next;
+        }
+    }
+#endif
+
     mem_conspn->total_size += mem_conspn->module_struct_size;
     mem_conspn->total_size += mem_conspn->types_size;
     mem_conspn->total_size += mem_conspn->imports_size;
@@ -4283,6 +4296,9 @@ wasm_get_module_mem_consumption(const WASMModule *module,
     mem_conspn->total_size += mem_conspn->table_segs_size;
     mem_conspn->total_size += mem_conspn->data_segs_size;
     mem_conspn->total_size += mem_conspn->const_strs_size;
+#if WASM_ENABLE_LOAD_CUSTOM_SECTION != 0
+    mem_conspn->total_size += mem_conspn->custom_sections_size;
+#endif
 }
 
 void

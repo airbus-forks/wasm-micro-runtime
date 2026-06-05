@@ -48,6 +48,7 @@ function help()
                                             (e.g., ubsan, tsan, asan, posan)."
     echo "-A use the specified wamrc command instead of building it"
     echo "-N enable extended const expression feature"
+    echo "-U enable full unit test (passes FULL_TEST=ON to cmake when -s unit is used)"
     echo "-r [requirement name] [N [N ...]] specify a requirement name followed by one or more"
     echo "                                  subrequirement IDs, if no subrequirement is specificed,"
     echo "                                  it will run all subrequirements. When this optin is used,"
@@ -75,6 +76,7 @@ ENABLE_XIP=0
 ENABLE_EH=0
 ENABLE_DEBUG_VERSION=0
 ENABLE_GC_HEAP_VERIFY=0
+UNIT_FULL_TEST=0
 #unit test case arrary
 TEST_CASE_ARR=()
 SGX_OPT=""
@@ -220,6 +222,10 @@ do
         N)
         echo "enable extended const expression feature"
         ENABLE_EXTENDED_CONST_EXPR=1
+        ;;
+        U)
+        echo "enable full unit test (FULL_TEST=ON)"
+        UNIT_FULL_TEST=1
         ;;
         P)
         PARALLELISM=1
@@ -455,7 +461,9 @@ function unit_test()
         # -u argument was not passed
         echo "Skipping folder-specific tests."
         cmake -S ${WORK_DIR}/../../unit -B unittest-build \
-              -DCOLLECT_CODE_COVERAGE=${COLLECT_CODE_COVERAGE}
+              -DCOLLECT_CODE_COVERAGE=${COLLECT_CODE_COVERAGE} \
+              -DFULL_TEST=${UNIT_FULL_TEST} \
+              -DWAMRC_COMPILER_DIR=${WAMR_DIR}/wamr-compiler/build
             cmake --build unittest-build
             ctest --test-dir unittest-build --output-on-failure | tee -a ${REPORT_DIR}/unit_test_report.txt
     fi

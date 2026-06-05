@@ -57,7 +57,24 @@ zephyr_library_sources (
   wamr_lib.c
 )
 
+# Suppress -Wtype-limits warnings originating from Zephyr's own headers
+# (e.g. net_if.h:861 "comparison is always true due to limited range of data type").
+# These are pulled in transitively via platform_internal.h → net_pkt.h → net_if.h
+# and cannot be fixed in WAMR source code.
+zephyr_library_compile_options(-Wno-type-limits)
+
+# Ensure generated headers (e.g. heap_constants.h) are ready before compiling
+# the library. Zephyr adds this dependency for its own libraries automatically,
+# but parallel builds can race when the library is added via add_subdirectory.
+if(TARGET zephyr_generated_headers)
+  add_dependencies(wamr_lib zephyr_generated_headers)
+endif()
+
 # Specify the memory partition where all globals(including the WAMR global heap buffer)
 # in the library should be placed. This partition will be defined in the app source code
 # and added to the use-mode thread that uses the WAMR library.
-zephyr_library_app_memory (wamr_partition)
+# When WAMR_USE_PREBUILT_LIB is set, the parent CMakeLists.txt handles partition
+# registration via set_property() instead, demonstrating the pre-built library approach.
+if (NOT WAMR_USE_PREBUILT_LIB)
+  zephyr_library_app_memory (wamr_partition)
+endif ()
