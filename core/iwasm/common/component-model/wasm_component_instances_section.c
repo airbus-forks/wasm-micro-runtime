@@ -213,23 +213,21 @@ wasm_component_parse_instances_section(const uint8_t **payload,
 
                         for (uint32_t j = 0; j < inline_expr_len; j++) {
                             // inlineexport ::= n:<exportname> si:<sortidx>
-                            WASMComponentCoreName *name = wasm_runtime_malloc(
-                                sizeof(WASMComponentCoreName));
-                            if (!name) {
-                                set_error_buf_ex(error_buf, error_buf_size,
-                                                 "Failed to allocate memory "
-                                                 "for component export name");
-                                if (consumed_len)
-                                    *consumed_len = (uint32_t)(p - *payload);
-                                return false;
-                            }
+                            /* parse_core_name() allocates the result itself and
+                             * only writes *out on success. Pre-allocating here
+                             * leaked that struct on success and, worse, left
+                             * `name` pointing at uninitialized memory whose
+                             * ->name field free_core_name() then dereferenced on
+                             * the failure path (heap-use-after-free found by the
+                             * component-parser fuzz target). Pass NULL and let
+                             * parse_core_name own the allocation + its own
+                             * cleanup on failure. */
+                            WASMComponentCoreName *name = NULL;
 
                             // Parse export name (component-level name)
                             bool name_parse_success = parse_core_name(
                                 &p, end, &name, error_buf, error_buf_size);
                             if (!name_parse_success) {
-                                free_core_name(name);
-                                wasm_runtime_free(name);
                                 if (consumed_len)
                                     *consumed_len = (uint32_t)(p - *payload);
                                 return false;
