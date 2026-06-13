@@ -1418,6 +1418,17 @@ parse_param_list(const uint8_t **payload, const uint8_t *end,
 
     // Allocate memory for the param list
     if (param_count > 0) {
+        /* Each param occupies at least one byte in the payload, so a count
+         * larger than the remaining input is malformed. Rejecting it here
+         * also bounds the allocation and prevents the size_t multiply below
+         * from overflowing on 32-bit targets (where it would wrap and
+         * under-allocate). */
+        if (param_count > (uint32_t)(end - p)) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "param count %u exceeds remaining input",
+                             param_count);
+            return false;
+        }
         (*out)->params = wasm_runtime_malloc(sizeof(WASMComponentLabelValType)
                                              * param_count);
         if (!(*out)->params) {
@@ -1425,6 +1436,13 @@ parse_param_list(const uint8_t **payload, const uint8_t *end,
                              "Failed to allocate memory for param list");
             return false;
         }
+        /* Zero the array so that if parse_labelvaltype fails partway through
+         * the loop below, the unparsed tail stays NULL. The cleanup path
+         * (free_component_types_entry) walks all `count` entries and would
+         * otherwise dereference uninitialized label / value_type pointers
+         * (found by the component-parser fuzz target). */
+        memset((*out)->params, 0,
+               sizeof(WASMComponentLabelValType) * param_count);
 
         // Parse the param list
         for (uint32_t i = 0; i < param_count; i++) {
@@ -1722,6 +1740,12 @@ parse_component_decl_export(const uint8_t **payload, const uint8_t *end,
         return false;
     }
 
+    /* Ownership of export_name now belongs to *out; on any later error
+     * path it is freed by the centralized cleanup
+     * (free_component_instance_decl -> free_component_export_name), which
+     * walks (*out)->export_name. Freeing it locally below as well caused a
+     * double-free / heap-use-after-free (found by the component-parser
+     * fuzz target). */
     (*out)->export_name = export_name;
 
     WASMComponentExternDesc *extern_desc =
@@ -1729,7 +1753,7 @@ parse_component_decl_export(const uint8_t **payload, const uint8_t *end,
     if (!extern_desc) {
         set_error_buf_ex(error_buf, error_buf_size,
                          "Failed to allocate memory for extern desc");
-        wasm_runtime_free(export_name);
+        /* export_name is owned by *out; the caller frees it. */
         return false;
     }
     memset(extern_desc, 0, sizeof(WASMComponentExternDesc));
@@ -1738,8 +1762,9 @@ parse_component_decl_export(const uint8_t **payload, const uint8_t *end,
     if (!parse_extern_desc(&p, end, extern_desc, error_buf, error_buf_size)) {
         set_error_buf_ex(error_buf, error_buf_size,
                          "Failed to parse extern desc");
+        /* extern_desc is not yet owned by *out -> free it here.
+         * export_name IS owned by *out -> the caller frees it. */
         wasm_runtime_free(extern_desc);
-        wasm_runtime_free(export_name);
         return false;
     }
 
@@ -1874,6 +1899,16 @@ parse_component_type(const uint8_t **payload, const uint8_t *end,
 
     // Allocate memory for the component list
     if (component_count > 0) {
+        /* Each componentdecl is at least one byte, so a count larger than the
+         * remaining input is malformed. This also bounds the allocation and
+         * prevents the size_t multiply below from overflowing on 32-bit
+         * targets. */
+        if (component_count > (uint32_t)(end - p)) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "component count %u exceeds remaining input",
+                             component_count);
+            return false;
+        }
         (*out)->component_decls = wasm_runtime_malloc(
             sizeof(WASMComponentComponentDecl) * component_count);
         if (!(*out)->component_decls) {
@@ -1881,6 +1916,14 @@ parse_component_type(const uint8_t **payload, const uint8_t *end,
                              "Failed to allocate memory for component list");
             return false;
         }
+        /* Zero the array: (*out)->count is already the full declared count, so
+         * if parse_component_decl fails partway the caller's cleanup
+         * (free_component_component_type -> free_component_decl) still walks all
+         * `count` entries. Without this the unparsed tail is uninitialized and
+         * free_component_decl dereferences a wild decl->tag (found by the
+         * component-parser fuzz target). */
+        memset((*out)->component_decls, 0,
+               sizeof(WASMComponentComponentDecl) * component_count);
 
         // Parse the component list
         for (uint32_t i = 0; i < component_count; i++) {
@@ -1951,6 +1994,16 @@ parse_component_instance_type(const uint8_t **payload, const uint8_t *end,
 
     // Allocate memory for the instance list
     if (instance_count > 0) {
+        /* Each instancedecl is at least one byte, so a count larger than the
+         * remaining input is malformed. This also bounds the allocation and
+         * prevents the size_t multiply below from overflowing on 32-bit
+         * targets. */
+        if (instance_count > (uint32_t)(end - p)) {
+            set_error_buf_ex(error_buf, error_buf_size,
+                             "instance count %u exceeds remaining input",
+                             instance_count);
+            goto fail;
+        }
         instance_decls =
             wasm_runtime_malloc(sizeof(WASMComponentInstDecl) * instance_count);
         if (!instance_decls) {
@@ -1958,6 +2011,14 @@ parse_component_instance_type(const uint8_t **payload, const uint8_t *end,
                              "Failed to allocate memory for instance list");
             goto fail;
         }
+        /* Zero the array so a parse failure partway through the loop leaves the
+         * unparsed tail as zeroed decls. This function recurses (an instancedecl
+         * may itself be an instance type), and the cleanup walk
+         * (free_component_instance_decl) reads decl->tag for every entry; an
+         * uninitialized tail produced a wild dereference at arbitrary nesting
+         * depth (found by the component-parser fuzz target). */
+        memset(instance_decls, 0,
+               sizeof(WASMComponentInstDecl) * instance_count);
 
         // Parse the instance list
         for (uint32_t i = 0; i < instance_count; i++) {
