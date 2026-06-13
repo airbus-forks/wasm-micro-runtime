@@ -1,0 +1,8 @@
+build/
+corpus/
+corpus_verify/
+findings/
+crash-*
+oom-*
+leak-*
+timeout-*
